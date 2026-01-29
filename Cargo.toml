@@ -1,0 +1,25 @@
+[package]
+name = "ptab"
+version = "0.1.0"
+authors = ["l1h3r <5410284+l1h3r@users.noreply.github.com>"]
+categories = []
+description = ""
+documentation = "https://docs.rs/ptab"
+edition = "2024"
+homepage = "https://github.com/l1h3r/ptab"
+keywords = []
+license = "MIT OR Apache-2.0"
+readme = "README.md"
+repository = "https://github.com/l1h3r/ptab"
+rust-version = "1.92"
+
+[package.metadata.docs.rs]
+targets = ["x86_64-unknown-linux-gnu"]
+all-features = true
+rustdoc-args = [
+  "--generate-link-to-definition",
+  "--generate-macro-expansion",
+  "--extern-html-root-url=core=https://doc.rust-lang.org",
+  "--extern-html-root-url=alloc=https://doc.rust-lang.org",
+  "--extern-html-root-url=std=https://doc.rust-lang.org",
+]
