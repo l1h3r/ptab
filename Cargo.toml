@@ -23,3 +23,85 @@ rustdoc-args = [
   "--extern-html-root-url=alloc=https://doc.rust-lang.org",
   "--extern-html-root-url=std=https://doc.rust-lang.org",
 ]
+
+[dependencies]
+sdd = { version = "4.6", default-features = false }
+
+[features]
+# Enable tests that are generally quite slow.
+slow = []
+
+# Enable the use of loom for concurrency testing.
+#
+# This configuration option is outside of the normal semver guarantees: minor
+# versions of ptab may make breaking changes to it at any time.
+loom = ["dep:loom", "sdd/loom"]
+
+[target."cfg(loom)".dependencies]
+loom = { version = "0.7", default-features = false, optional = true }
+
+[target."cfg(loom)".dev-dependencies]
+loom = { version = "0.7", default-features = false }
+
+# ------------------------------------------------------------------------------
+# Rustc Lints
+# https://doc.rust-lang.org/rustc/lints/index.html
+# ------------------------------------------------------------------------------
+
+[lints.rust]
+# Lint Groups
+warnings = { level = "deny", priority = -1 }
+deprecated-safe = { level = "deny", priority = -1 }
+future-incompatible = { level = "deny", priority = -1 }
+keyword-idents = { level = "deny", priority = -1 }
+let-underscore = { level = "deny", priority = -1 }
+nonstandard-style = { level = "deny", priority = -1 }
+refining-impl-trait = { level = "deny", priority = -1 }
+rust-2018-compatibility = { level = "deny", priority = -1 }
+rust-2018-idioms = { level = "deny", priority = -1 }
+rust-2021-compatibility = { level = "deny", priority = -1 }
+rust-2024-compatibility = { level = "deny", priority = -1 }
+unused = { level = "deny", priority = -1 }
+
+# Standalone Lints
+unexpected_cfgs = { level = "warn", check-cfg = ["cfg(loom)"] }
+
+# ------------------------------------------------------------------------------
+# Clippy Lints
+# https://doc.rust-lang.org/clippy
+# ------------------------------------------------------------------------------
+
+[lints.clippy]
+correctness = { level = "deny", priority = -1 }
+suspicious = { level = "deny", priority = -1 }
+style = { level = "deny", priority = -1 }
+complexity = { level = "deny", priority = -1 }
+perf = { level = "deny", priority = -1 }
+pedantic = { level = "deny", priority = -1 }
+restriction = { level = "allow", priority = -1 }
+nursery = { level = "allow", priority = -1 }
+cargo = { level = "allow", priority = -1 }
+
+# Misc. Noise
+cast_possible_truncation = "allow"
+doc_markdown = "allow"
+manual_map = "allow"
+must_use_candidate = "allow"
+unused_self = "allow"
+
+# ------------------------------------------------------------------------------
+# Rustdoc Lints
+# https://doc.rust-lang.org/rustdoc/lints.html
+# ------------------------------------------------------------------------------
+
+[lints.rustdoc]
+broken_intra_doc_links = "deny"
+private_intra_doc_links = "deny"
+missing_crate_level_docs = "deny"
+private_doc_tests = "deny"
+invalid_codeblock_attributes = "deny"
+invalid_html_tags = "deny"
+invalid_rust_codeblocks = "deny"
+bare_urls = "deny"
+unescaped_backticks = "deny"
+redundant_explicit_links = "deny"
