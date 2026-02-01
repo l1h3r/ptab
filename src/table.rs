@@ -4,7 +4,9 @@ use core::fmt::Formatter;
 use core::fmt::Result as FmtResult;
 use core::hint;
 use core::marker::PhantomData;
+use core::mem;
 use core::mem::MaybeUninit;
+use core::ptr;
 
 use sdd::AtomicOwned;
 use sdd::Guard;
@@ -20,6 +22,7 @@ use crate::padded::CachePadded;
 use crate::params::Capacity;
 use crate::params::Params;
 use crate::params::ParamsExt;
+use crate::sync::atomic::AtomicPtr;
 use crate::sync::atomic::AtomicU32;
 use crate::sync::atomic::AtomicUsize;
 use crate::sync::atomic::Ordering;
@@ -45,6 +48,16 @@ fn store<T: 'static>(atomic: &AtomicOwned<T>, value: T, order: Ordering) {
     hint::assert_unchecked(prv.0.is_none());
     hint::assert_unchecked(prv.1 == Tag::None);
   }
+}
+
+#[inline]
+fn take<T>(atomic: &AtomicOwned<T>, order: Ordering) -> Option<Owned<T>> {
+  // SAFETY: params.rs ensures `AtomicOwned<T>` has `AtomicPtr<T>` layout
+  let this: &AtomicPtr<T> = unsafe { &*ptr::from_ref(atomic).cast() };
+  let data: *mut T = this.swap(ptr::null_mut(), order);
+
+  // SAFETY: This is wildly unsafe - just look away
+  unsafe { mem::transmute::<_, Option<Owned<T>>>(data) }
 }
 
 // -----------------------------------------------------------------------------
@@ -128,7 +141,7 @@ where
   pub(crate) fn remove(&self, key: Detached) -> bool {
     let index: Concrete<P> = Concrete::from_detached(key);
     let entry: &AtomicOwned<T> = self.readonly.data.get(index);
-    let value: Option<Owned<T>> = entry.swap((None, Tag::None), AcqRel).0;
+    let value: Option<Owned<T>> = take(entry, AcqRel);
 
     if value.is_none() {
       return false;

@@ -162,6 +162,7 @@ mod sync {
   #[cfg(loom)]
   mod exports {
     pub(crate) mod atomic {
+      pub(crate) use ::loom::sync::atomic::AtomicPtr;
       pub(crate) use ::loom::sync::atomic::AtomicU32;
       pub(crate) use ::loom::sync::atomic::AtomicUsize;
       pub(crate) use ::loom::sync::atomic::Ordering;
@@ -171,6 +172,7 @@ mod sync {
   #[cfg(not(loom))]
   mod exports {
     pub(crate) mod atomic {
+      pub(crate) use ::core::sync::atomic::AtomicPtr;
       pub(crate) use ::core::sync::atomic::AtomicU32;
       pub(crate) use ::core::sync::atomic::AtomicUsize;
       pub(crate) use ::core::sync::atomic::Ordering;
