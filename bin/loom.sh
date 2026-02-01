@@ -1,4 +1,4 @@
-#!/usr/bin/env zsh
+#!/usr/bin/env bash
 
 # Runs Loom tests with defaults for Loom's configuration values.
 #

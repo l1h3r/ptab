@@ -54,6 +54,7 @@ where
   }
 
   /// Creates a new array with all bytes zeroed.
+  #[allow(dead_code, reason = "not used with loom tests")]
   #[inline]
   pub(crate) fn new_zeroed() -> Array<MaybeUninit<T>, P> {
     let this: Array<MaybeUninit<T>, P> = Self::new_uninit();
