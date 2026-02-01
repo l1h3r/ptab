@@ -3,11 +3,9 @@ use divan::bench;
 use divan::bench_group;
 use divan::black_box;
 use divan::black_box_drop;
-use divan::counter::ItemsCount;
 use idr_ebr::Idr;
 use ptab::Detached;
 use sharded_slab::Slab;
-use std::sync::Arc;
 
 type PTab<T> = ptab::PTab<T, ptab::ConstParams<{ 1 << 16 }>>;
 
@@ -290,7 +288,7 @@ mod drop {
 
   impl Drop for DropMe {
     fn drop(&mut self) {
-      // do nothing
+      let _ignore: usize = self.0;
     }
   }
 
