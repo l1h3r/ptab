@@ -8,7 +8,7 @@ use crate::params::Params;
 use crate::params::ParamsExt;
 
 // This will take about a minute to run in debug mode, sorry
-#[cfg_attr(not(feature = "slow"), ignore)]
+#[cfg_attr(not(feature = "slow"), ignore = "too slow")]
 #[test]
 fn test_abstract_to_concrete_covers_all_slots() {
   each_capacity!({
