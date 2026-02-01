@@ -1,3 +1,17 @@
+#[cfg(miri)]
+macro_rules! each_capacity {
+  ($expr:expr) => {{
+    each_capacity!(@run, $expr, 1 << 4);
+    each_capacity!(@run, $expr, 1 << 10);
+    each_capacity!(@run, $expr, 1 << 16);
+  }};
+  (@run, $expr:expr, $size:expr) => {{
+    type P = $crate::params::ConstParams::<{ $size }>;
+    $expr
+  }};
+}
+
+#[cfg(not(miri))]
 macro_rules! each_capacity {
   ($expr:expr) => {{
     each_capacity!(@run, $expr, 1 << 4);
