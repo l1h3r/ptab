@@ -100,14 +100,14 @@ where
   }
 
   #[inline]
-  pub(crate) fn as_slice(&self) -> &[T] {
+  pub(crate) const fn as_slice(&self) -> &[T] {
     // SAFETY: The pointer addresses a contiguous allocation of `P::LENGTH`
     // initialized elements.
     unsafe { slice::from_raw_parts(self.as_ptr(), P::LENGTH.as_usize()) }
   }
 
   #[inline]
-  pub(crate) fn as_mut_slice(&mut self) -> &mut [T] {
+  pub(crate) const fn as_mut_slice(&mut self) -> &mut [T] {
     // SAFETY: The pointer addresses a contiguous allocation of `P::LENGTH`
     // initialized elements.
     unsafe { slice::from_raw_parts_mut(self.as_mut_ptr(), P::LENGTH.as_usize()) }
@@ -115,7 +115,7 @@ where
 
   /// Returns a reference to the element at the given index.
   #[inline]
-  pub(crate) fn get(&self, index: Concrete<P>) -> &T {
+  pub(crate) const fn get(&self, index: Concrete<P>) -> &T {
     // SAFETY: `Concrete<P>` indices are always less than `P::LENGTH`.
     unsafe { self.get_unchecked(index.get()) }
   }

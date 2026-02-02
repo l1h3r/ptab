@@ -91,7 +91,7 @@ where
   /// assert_eq!(table.capacity(), 512);
   /// ```
   #[inline]
-  pub fn capacity(&self) -> usize {
+  pub const fn capacity(&self) -> usize {
     self.inner.cap()
   }
 

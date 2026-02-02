@@ -78,7 +78,7 @@ where
 
   #[track_caller]
   #[inline]
-  pub(crate) fn cap(&self) -> usize {
+  pub(crate) const fn cap(&self) -> usize {
     P::LENGTH.as_usize()
   }
 
@@ -264,7 +264,7 @@ where
   /// Advances the generation by adding capacity, ensuring the same concrete
   /// slot maps to a different abstract index on reuse.
   #[inline]
-  fn generate_next_slot(&self, index: Detached) -> usize {
+  const fn generate_next_slot(&self, index: Detached) -> usize {
     let mut data: usize = Abstract::<P>::from_detached(index).get();
 
     data = data.wrapping_add(self.cap());
