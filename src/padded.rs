@@ -57,7 +57,12 @@ pub struct CachePadded<T> {
   value: T,
 }
 
+// SAFETY: `CachePadded<T>` is a transparent wrapper with no additional state,
+// so it inherits `Send` from `T`.
 unsafe impl<T: Send> Send for CachePadded<T> {}
+
+// SAFETY: `CachePadded<T>` is a transparent wrapper with no additional state,
+// so it inherits `Sync` from `T`.
 unsafe impl<T: Sync> Sync for CachePadded<T> {}
 
 impl<T> CachePadded<T> {
