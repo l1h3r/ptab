@@ -1,4 +1,5 @@
 use core::alloc::Layout;
+use core::any;
 use core::fmt::Debug;
 use core::fmt::Formatter;
 use core::fmt::Result as FmtResult;
@@ -180,7 +181,7 @@ where
   P: Params + ?Sized,
 {
   fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
-    f.debug_struct(std::any::type_name::<P>())
+    f.debug_struct(any::type_name::<P>())
       .field("LENGTH", &P::LENGTH)
       .field("BLOCKS", &P::BLOCKS)
       .field("LAYOUT", &P::LAYOUT)
