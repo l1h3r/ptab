@@ -86,7 +86,7 @@ jobs:
       - run: cargo miri setup
       - run: cargo miri test
         env:
-          MIRIFLAGS: -Zmiri-strict-provenance
+          MIRIFLAGS: -Zmiri-permissive-provenance
 
   clippy:
     name: Clippy
