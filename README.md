@@ -1,5 +1,10 @@
 # ptab
 
+[![github][shield-img-github]][shield-url-github]
+[![crates.io][shield-img-crates]][shield-url-crates]
+[![docs.rs][shield-img-docs]][shield-url-docs]
+[![build status][shield-img-ci]][shield-url-ci]
+
 Lock-free concurrent table optimized for read-heavy workloads.
 
 Inspired by the Erlang/OTP BEAM process table, `ptab` provides a fixed-capacity table where lookup operations perform no shared memory writes - not even reference counts. This enables linear read scalability with CPU count.
@@ -62,3 +67,17 @@ See [`IMPLEMENTATION.md`] for details.
 [`IMPLEMENTATION.md`]: IMPLEMENTATION.md
 [`sharded-slab`]: https://crates.io/crates/sharded-slab
 [`sdd`]: https://crates.io/crates/sdd
+
+[//]: # (badges)
+
+[shield-url-github]: https://github.com/l1h3r/ptab
+[shield-img-github]: https://img.shields.io/badge/github-l1h3r/ptab-main?style=flat-square&logo=github
+
+[shield-url-crates]: https://crates.io/crates/ptab
+[shield-img-crates]: https://img.shields.io/crates/v/ptab?style=flat-square&logo=rust
+
+[shield-url-docs]: https://docs.rs/ptab
+[shield-img-docs]: https://img.shields.io/docsrs/ptab?style=flat-square&logo=docs.rs
+
+[shield-url-ci]: https://github.com/l1h3r/ptab/actions/workflows/ci.yml?query=branch:main
+[shield-img-ci]: https://img.shields.io/github/actions/workflow/status/l1h3r/ptab/ci.yml?style=flat-square
