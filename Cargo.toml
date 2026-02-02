@@ -35,7 +35,7 @@ slow = []
 #
 # This configuration option is outside of the normal semver guarantees: minor
 # versions of ptab may make breaking changes to it at any time.
-loom = ["dep:loom", "sdd/loom"]
+loom = ["dep:loom"]
 
 [target."cfg(loom)".dependencies]
 loom = { version = "0.7", default-features = false, optional = true }
