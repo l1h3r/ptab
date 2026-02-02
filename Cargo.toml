@@ -11,7 +11,7 @@ keywords = ["atomic", "concurrent", "lock-free"]
 license = "MIT OR Apache-2.0"
 readme = "README.md"
 repository = "https://github.com/l1h3r/ptab"
-rust-version = "1.92"
+rust-version = "1.91"
 
 [package.metadata.docs.rs]
 targets = ["x86_64-unknown-linux-gnu"]
