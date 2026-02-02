@@ -4,6 +4,7 @@ use core::fmt::Formatter;
 use core::fmt::Result as FmtResult;
 use core::hint;
 use core::marker::PhantomData;
+use core::mem;
 use core::mem::MaybeUninit;
 
 use sdd::AtomicOwned;
@@ -273,6 +274,50 @@ where
 
     data
   }
+
+  fn drop_slow(&mut self) {
+    let count: u32 = self.len();
+
+    if count == 0 {
+      return;
+    }
+
+    let mut count: u32 = count;
+
+    for entry in self.readonly.data.as_mut_slice() {
+      #[cfg(not(loom))]
+      let item: AtomicOwned<T> = mem::replace(entry, const { AtomicOwned::null() });
+
+      #[cfg(loom)]
+      let item: AtomicOwned<T> = mem::replace(entry, AtomicOwned::null());
+
+      if let Some(value) = item.into_owned(Ordering::Relaxed) {
+        // SAFETY: Drop provides exclusive access (`&mut self`), so no other
+        // thread can be accessing these pointers. We can safely take ownership.
+        unsafe {
+          value.drop_in_place() ;
+        }
+
+        count -= 1;
+      }
+
+      if count == 0 {
+        break;
+      }
+    }
+  }
+}
+
+impl<T, P> Drop for Table<T, P>
+where
+  P: Params + ?Sized,
+{
+  #[inline]
+  fn drop(&mut self) {
+    if mem::needs_drop::<T>() {
+      self.drop_slow();
+    }
+  }
 }
 
 impl<T, P> Debug for Table<T, P>
@@ -396,19 +441,6 @@ where
 
       item.write(AtomicUsize::new(value));
     })
-  }
-}
-
-impl<T, P> Drop for ReadOnly<T, P>
-where
-  P: Params + ?Sized,
-{
-  fn drop(&mut self) {
-    for entry in self.data.as_slice() {
-      if let Some(value) = entry.swap((None, Tag::None), Relaxed).0 {
-        unsafe { value.drop_in_place() }
-      }
-    }
   }
 }
 
