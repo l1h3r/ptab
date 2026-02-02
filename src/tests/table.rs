@@ -1,4 +1,6 @@
 use std::collections::HashSet;
+use std::sync::atomic::AtomicU32;
+use std::sync::atomic::Ordering;
 
 use crate::index::Detached;
 use crate::params::Capacity;
@@ -350,4 +352,56 @@ fn test_max_capacity_operations() {
 
   assert_eq!(table.cap(), Capacity::MAX.as_usize());
   assert_eq!(table.len(), 1); // See `Volatile::new`
+}
+
+#[test]
+fn test_drop() {
+  static COUNT: AtomicU32 = AtomicU32::new(0);
+
+  struct DropMe(u32);
+
+  impl DropMe {
+    fn new() -> Self {
+      Self(COUNT.fetch_add(1, Ordering::Relaxed))
+    }
+  }
+
+  impl Drop for DropMe {
+    fn drop(&mut self) {
+      COUNT.fetch_sub(1, Ordering::Relaxed);
+    }
+  }
+
+  let drop_0: Table<DropMe, TestParams> = Table::new();
+
+  assert_eq!(COUNT.load(Ordering::Relaxed), 0);
+  assert_eq!(COUNT.load(Ordering::Relaxed), drop_0.len());
+  drop(drop_0);
+  assert_eq!(COUNT.load(Ordering::Relaxed), 0);
+
+  let drop_1: Table<DropMe, TestParams> = {
+    let this = Table::new();
+    this.insert(DropMe::new()).unwrap();
+    this
+  };
+
+  assert_eq!(COUNT.load(Ordering::Relaxed), 1);
+  assert_eq!(COUNT.load(Ordering::Relaxed), drop_1.len());
+  drop(drop_1);
+  assert_eq!(COUNT.load(Ordering::Relaxed), 0);
+
+  let drop_full: Table<DropMe, TestParams> = {
+    let this = Table::new();
+
+    for _ in 0..this.cap() {
+      this.insert(DropMe::new()).unwrap();
+    }
+
+    this
+  };
+
+  assert_eq!(COUNT.load(Ordering::Relaxed), drop_full.cap() as u32);
+  assert_eq!(COUNT.load(Ordering::Relaxed), drop_full.len());
+  drop(drop_full);
+  assert_eq!(COUNT.load(Ordering::Relaxed), 0);
 }
