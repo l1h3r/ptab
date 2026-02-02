@@ -43,6 +43,8 @@ See [`IMPLEMENTATION.md`] for details.
 - **Generational indices**: Slot reuse produces different indices (ABA prevention)
 - **Epoch-based reclamation**: Safe memory management via [`sdd`]
 
+<br>
+
 #### License
 
 <sup>
