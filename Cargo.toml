@@ -2,12 +2,12 @@
 name = "ptab"
 version = "0.1.0"
 authors = ["l1h3r <5410284+l1h3r@users.noreply.github.com>"]
-categories = []
-description = ""
+categories = ["concurrency", "data-structures", "memory-management"]
+description = "Lock-free concurrent table optimized for read-heavy workloads"
 documentation = "https://docs.rs/ptab"
 edition = "2024"
 homepage = "https://github.com/l1h3r/ptab"
-keywords = []
+keywords = ["atomic", "concurrent", "lock-free"]
 license = "MIT OR Apache-2.0"
 readme = "README.md"
 repository = "https://github.com/l1h3r/ptab"
@@ -89,7 +89,7 @@ perf = { level = "deny", priority = -1 }
 pedantic = { level = "deny", priority = -1 }
 restriction = { level = "allow", priority = -1 }
 nursery = { level = "allow", priority = -1 }
-cargo = { level = "allow", priority = -1 }
+cargo = { level = "deny", priority = -1 }
 
 # Misc. Noise
 cast_possible_truncation = "allow"
