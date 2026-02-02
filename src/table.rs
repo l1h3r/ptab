@@ -294,12 +294,7 @@ where
       let item: AtomicOwned<T> = mem::replace(entry, AtomicOwned::null());
 
       if let Some(value) = item.into_owned(Ordering::Relaxed) {
-        // SAFETY: `Drop` provides exclusive access, so no other thread can be
-        // reading these pointers.
-        unsafe {
-          value.drop_in_place();
-        }
-
+        drop(value);
         count -= 1;
       }
 
@@ -307,6 +302,15 @@ where
         break;
       }
     }
+
+    // The number of epochs required for `sdd` to begin garbage collection
+    const EPOCHS: usize = 3;
+
+    for _ in 0..EPOCHS {
+      Guard::new().accelerate();
+    }
+
+    drop(Guard::new());
   }
 }
 
