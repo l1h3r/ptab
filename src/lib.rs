@@ -57,7 +57,7 @@
 //! ```
 //!
 //! Capacity is always rounded up to the nearest power of two and clamped
-//! to the range [`Capacity::MIN`]`..=`[`Capacity::MAX`].
+//! to the range <code>[Capacity::MIN]..=[Capacity::MAX]</code>.
 //!
 //! # Concurrency
 //!

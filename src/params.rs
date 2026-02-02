@@ -102,7 +102,7 @@ pub trait Params {
   /// The maximum number of entries the table can hold.
   ///
   /// This value is rounded up to the nearest power of two and clamped to
-  /// [`Capacity::MIN`]`..=`[`Capacity::MAX`].
+  /// <code>[Capacity::MIN]..=[Capacity::MAX]</code>.
   const LENGTH: Capacity = DefaultParams::LENGTH;
 }
 
@@ -240,7 +240,7 @@ impl Params for DefaultParams {
 ///
 /// This is the recommended way to create tables with custom capacities.
 /// The capacity `N` is rounded up to the nearest power of two and clamped
-/// to [`Capacity::MIN`]`..=`[`Capacity::MAX`].
+/// to <code>[Capacity::MIN]..=[Capacity::MAX]</code>.
 ///
 /// # Examples
 ///
@@ -297,7 +297,7 @@ impl<P> ParamsExt for P where P: Params + ?Sized {}
 
 /// A validated table capacity value.
 ///
-/// `Capacity` represents a power-of-two value in the range [`MIN`]`..=`[`MAX`].
+/// `Capacity` represents a power-of-two value in the range <code>[MIN]..=[MAX]</code>.
 /// It is used by [`Params::LENGTH`] to specify how many entries a table can hold.
 ///
 /// # Construction
@@ -326,8 +326,8 @@ impl<P> ParamsExt for P where P: Params + ?Sized {}
 /// assert_eq!(cap, Capacity::MAX);
 /// ```
 ///
-/// [`MIN`]: Self::MIN
-/// [`MAX`]: Self::MAX
+/// [MIN]: Self::MIN
+/// [MAX]: Self::MAX
 #[derive(Copy, Clone, PartialEq, Eq)]
 #[repr(transparent)]
 pub struct Capacity(CapacityEnum);
@@ -345,7 +345,7 @@ impl Capacity {
   /// Creates a new `Capacity` from an arbitrary value.
   ///
   /// The value is rounded up to the nearest power of two and clamped to
-  /// [`MIN`]`..=`[`MAX`].
+  /// <code>[MIN]..=[MAX]</code>.
   ///
   /// # Examples
   ///
@@ -356,8 +356,8 @@ impl Capacity {
   /// assert_eq!(Capacity::new(0), Capacity::MIN);
   /// ```
   ///
-  /// [`MIN`]: Self::MIN
-  /// [`MAX`]: Self::MAX
+  /// [MIN]: Self::MIN
+  /// [MAX]: Self::MAX
   #[inline]
   pub const fn new(value: usize) -> Self {
     let Some(capacity) = value.checked_next_power_of_two() else {
@@ -379,10 +379,10 @@ impl Capacity {
   ///
   /// # Safety
   ///
-  /// `value` must be a power of two in the range [`MIN`]`..=`[`MAX`].
+  /// `value` must be a power of two in the range <code>[MIN]..=[MAX]</code>.
   ///
-  /// [`MIN`]: Self::MIN
-  /// [`MAX`]: Self::MAX
+  /// [MIN]: Self::MIN
+  /// [MAX]: Self::MAX
   #[inline]
   pub const unsafe fn new_unchecked(value: usize) -> Self {
     // SAFETY: Caller guarantees `value` is a valid `Capacity`.
@@ -429,21 +429,21 @@ impl Debug for Capacity {
 
 impl Default for Capacity {
   #[inline]
-  fn default() -> Capacity {
-    Capacity::DEF
+  fn default() -> Self {
+    Self::DEF
   }
 }
 
 impl From<Capacity> for NonZeroUsize {
   #[inline]
-  fn from(other: Capacity) -> NonZeroUsize {
+  fn from(other: Capacity) -> Self {
     other.as_nonzero()
   }
 }
 
 impl From<Capacity> for usize {
   #[inline]
-  fn from(other: Capacity) -> usize {
+  fn from(other: Capacity) -> Self {
     other.as_usize()
   }
 }
