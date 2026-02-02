@@ -91,11 +91,24 @@ where
     self.nonnull.as_ptr()
   }
 
+  /// Returns a raw mutable pointer to the array.
+  #[inline]
+  pub(crate) const fn as_mut_ptr(&self) -> *mut T {
+    self.nonnull.as_ptr()
+  }
+
   #[inline]
   pub(crate) fn as_slice(&self) -> &[T] {
     // SAFETY: `self.nonnull` returns a pointer to the start of a contiguous
     // allocation of `P::LENGTH` elements, all of which are valid `T` values
     unsafe { slice::from_raw_parts(self.as_ptr(), P::LENGTH.as_usize()) }
+  }
+
+  #[inline]
+  pub(crate) fn as_mut_slice(&mut self) -> &mut [T] {
+    // SAFETY: `self.nonnull` returns a pointer to the start of a contiguous
+    // allocation of `P::LENGTH` elements, all of which are valid `T` values
+    unsafe { slice::from_raw_parts_mut(self.as_mut_ptr(), P::LENGTH.as_usize()) }
   }
 
   /// Returns a reference to the element at the given index.
