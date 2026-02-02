@@ -358,11 +358,12 @@ fn test_max_capacity_operations() {
 fn test_drop() {
   static COUNT: AtomicU32 = AtomicU32::new(0);
 
-  struct DropMe(u32);
+  struct DropMe;
 
   impl DropMe {
     fn new() -> Self {
-      Self(COUNT.fetch_add(1, Ordering::Relaxed))
+      COUNT.fetch_add(1, Ordering::Relaxed);
+      Self
     }
   }
 
