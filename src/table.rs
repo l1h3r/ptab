@@ -1,3 +1,5 @@
+//! Core table implementation with lock-free operations via epoch-based reclamation.
+
 use core::fmt::Debug;
 use core::fmt::DebugMap;
 use core::fmt::Formatter;
@@ -40,8 +42,8 @@ fn store<T: 'static>(atomic: &AtomicOwned<T>, value: T, order: Ordering) {
   debug_assert!(prv.0.is_none(), "AtomicOwned<T> is occupied!");
   debug_assert!(prv.1 == Tag::None, "AtomicOwned<T> is tagged!");
 
-  // SAFETY: The previous value is always NULL; we manage
-  // this lifecycle through the `readonly.slot` array.
+  // SAFETY: The slot is always null before `store`; we manage this invariant
+  // through the `readonly.slot` array.
   unsafe {
     hint::assert_unchecked(prv.0.is_none());
     hint::assert_unchecked(prv.1 == Tag::None);
@@ -160,7 +162,7 @@ where
     let guard: Guard = Guard::new();
     let value: Ptr<'_, T> = self.entry(key, &guard);
 
-    // SAFETY: We don't set any tag bits.
+    // SAFETY: No tag bits are set on these pointers.
     match unsafe { value.as_ref_unchecked() } {
       Some(data) => Some(f(data)),
       None => None,
@@ -176,7 +178,7 @@ where
     let guard: Guard = Guard::new();
     let value: Ptr<'_, T> = self.entry(key, &guard);
 
-    // SAFETY: We don't set any tag bits.
+    // SAFETY: No tag bits are set on these pointers.
     match unsafe { value.as_ref_unchecked() } {
       Some(data) => Some(*data),
       None => None,
@@ -252,8 +254,8 @@ where
 
     init(&mut uninit, index);
 
-    // SAFETY: The caller of `write()` is required to fully initialize the
-    // `MaybeUninit<T>` before returning from the `init` callback.
+    // SAFETY: The caller is required to fully initialize the `MaybeUninit<T>`
+    // before returning from the `init` callback.
     unsafe { uninit.assume_init() }
   }
 
@@ -292,10 +294,10 @@ where
       let item: AtomicOwned<T> = mem::replace(entry, AtomicOwned::null());
 
       if let Some(value) = item.into_owned(Ordering::Relaxed) {
-        // SAFETY: Drop provides exclusive access (`&mut self`), so no other
-        // thread can be accessing these pointers. We can safely take ownership.
+        // SAFETY: `Drop` provides exclusive access, so no other thread can be
+        // reading these pointers.
         unsafe {
-          value.drop_in_place() ;
+          value.drop_in_place();
         }
 
         count -= 1;
@@ -332,7 +334,7 @@ where
     for (index, entry) in self.readonly.data.as_slice().iter().enumerate() {
       let value: Ptr<'_, T> = entry.load(Acquire, &guard);
 
-      // SAFETY: We don't set any tag bits.
+      // SAFETY: No tag bits are set on these pointers.
       if let Some(value) = unsafe { value.as_ref_unchecked() } {
         debug.entry(&index, value);
       }
@@ -419,7 +421,7 @@ where
   #[cfg(not(loom))]
   #[inline]
   fn new_data_array() -> Array<AtomicOwned<T>, P> {
-    // SAFETY: An all-zeros bit pattern is a valid null pointer for `AtomicOwned<T>`.
+    // SAFETY: An all-zeros bit pattern is a valid null `AtomicOwned<T>`.
     unsafe { Array::new_zeroed().assume_init() }
   }
 

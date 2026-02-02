@@ -368,8 +368,8 @@ impl Capacity {
     } else if capacity > Self::MAX.as_usize() {
       Self::MAX
     } else {
-      // SAFETY: The `capacity` can never be zero, otherwise it would be less
-      // than `Self::MIN` (non-zero) and this branch would never be hit.
+      // SAFETY: `capacity` is non-zero because values below `Self::MIN` take
+      // the earlier branch.
       unsafe { Self::new_unchecked(capacity) }
     }
   }
@@ -384,7 +384,7 @@ impl Capacity {
   /// [`MAX`]: Self::MAX
   #[inline]
   pub const unsafe fn new_unchecked(value: usize) -> Self {
-    // SAFETY: Caller guarantees value is valid.
+    // SAFETY: Caller guarantees `value` is a valid `Capacity`.
     unsafe { mem::transmute::<usize, Self>(value) }
   }
 
@@ -397,7 +397,7 @@ impl Capacity {
   /// Returns the capacity as a [`NonZeroUsize`].
   #[inline]
   pub const fn as_nonzero(self) -> NonZeroUsize {
-    // SAFETY: All valid Capacity values are non-zero.
+    // SAFETY: All `Capacity` values are non-zero by construction.
     unsafe { mem::transmute::<Self, NonZeroUsize>(self) }
   }
 
@@ -513,8 +513,7 @@ const fn derive_layout<P>() -> Layout
 where
   P: Params + ?Sized,
 {
-  // SAFETY: The alignment is a power of two and non-zero; we've also ensured
-  // the values used to derive the allocation size do not result in
-  // `isize` overflow when the actual layout is computed.
+  // SAFETY: `CACHE_LINE` is a power of two. The size does not overflow
+  // `isize::MAX` as verified by `derive_blocks`.
   unsafe { Layout::from_size_align_unchecked(P::MEMORY, CACHE_LINE) }
 }

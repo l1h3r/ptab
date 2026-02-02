@@ -318,8 +318,8 @@ where
   }
 }
 
-// SAFETY: `PTab` is `Send` if `T` is `Send` because all internal state is
-// synchronized with atomic operations and epoch-based reclamation.
+// SAFETY: All internal state uses atomic operations and epoch-based
+// reclamation, so `PTab` is `Send` when `T` is `Send`.
 unsafe impl<T, P> Send for PTab<T, P>
 where
   T: Send,
@@ -327,10 +327,9 @@ where
 {
 }
 
-// SAFETY: `PTab` is `Sync` if `T` is `Send` because concurrent access is
-// mediated through atomic operations. `T: Sync` is not required because
-// the `with` callback borrows the table, preventing simultaneous mutable
-// access to the same entry.
+// SAFETY: Concurrent access is mediated through atomic operations. `T: Sync`
+// is not required because `with` borrows the table, preventing simultaneous
+// mutable access to the same entry.
 unsafe impl<T, P> Sync for PTab<T, P>
 where
   T: Send,

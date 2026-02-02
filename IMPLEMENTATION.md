@@ -47,7 +47,7 @@ bottleneck.
 │  │   Volatile (mutable)  │    │     ReadOnly (immutable)      │ │
 │  │   [cache-padded]      │    │     [cache-padded]            │ │
 │  ├───────────────────────┤    ├───────────────────────────────┤ │
-│  │ entries: AtomicU32    │    │ data: Array<Atomic<T>>        │ │
+│  │ entries: AtomicU32    │    │ data: Array<AtomicOwned<T>>   │ │
 │  │ next_id: AtomicU32    │    │ slot: Array<AtomicUsize>      │ │
 │  │ free_id: AtomicU32    │    │                               │ │
 │  └───────────────────────┘    └───────────────────────────────┘ │
@@ -197,8 +197,8 @@ Removing an entry:
 ### 1. Swap Out the Pointer
 
 ```rust,ignore
-let value = data[concrete_idx].swap(null, AcqRel);
-if value.is_null() {
+let value: Option<Owned<T>> = entry.swap((None, Tag::None), AcqRel).0;
+if value.is_none() {
     return false; // Already removed
 }
 ```
@@ -208,14 +208,10 @@ try to remove the same entry concurrently.
 
 ### 2. Defer Destruction
 
-```rust,ignore
-guard.defer_destroy(value);
-guard.flush();
-```
-
-The pointer is handed to the epoch-based reclamation system. The actual
+When the `Owned<T>` returned from the swap is dropped, the epoch-based
+reclamation system (`sdd`) schedules deferred destruction. The actual
 deallocation happens later, once all threads that might have been
-reading the entry have finished.
+reading the entry have moved past the current epoch.
 
 ### 3. Release the Slot
 
@@ -263,16 +259,15 @@ memory was retired.
 
 ```rust,ignore
 // Reader (in `with`)
-let guard = epoch::pin();           // Pin to current epoch
+let guard = Guard::new();                       // Pin to current epoch
 let ptr = data[idx].load(Acquire, &guard);
-let value = ptr.as_ref();           // Safe: guard keeps memory alive
+let value = ptr.as_ref();                       // Safe: guard keeps memory alive
 // ... use value ...
 // guard dropped: unpin from epoch
 
 // Writer (in `remove`)
-let guard = epoch::pin();
-let ptr = data[idx].swap(null, AcqRel, &guard);
-guard.defer_destroy(ptr);           // Free after epoch advances
+let value: Option<Owned<T>> = entry.swap((None, Tag::None), AcqRel).0;
+// Dropping `Owned<T>` defers destruction until epoch advances
 ```
 
 The key insight is that pinning only writes to thread-local storage,

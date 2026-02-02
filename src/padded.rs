@@ -1,3 +1,5 @@
+//! Cache-line padding to prevent false sharing.
+
 use core::fmt::Debug;
 use core::fmt::Display;
 use core::fmt::Formatter;

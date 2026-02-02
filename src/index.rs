@@ -1,3 +1,5 @@
+//! Index types and conversions.
+
 use core::fmt::Debug;
 use core::fmt::Display;
 use core::fmt::Formatter;
