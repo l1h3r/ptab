@@ -122,7 +122,7 @@ mod params;
 mod public;
 mod table;
 
-#[cfg(all(test, not(loom)))]
+#[cfg(all(test, not(any(loom, shuttle))))]
 mod tests;
 
 pub mod implementation {
@@ -159,6 +159,18 @@ mod alloc {
 }
 
 mod sync {
+  #[cfg(all(loom, shuttle))]
+  compile_error!("cannot use loom and shuttle at once");
+
+  #[cfg(not(any(loom, shuttle)))]
+  mod exports {
+    pub(crate) mod atomic {
+      pub(crate) use ::core::sync::atomic::AtomicU32;
+      pub(crate) use ::core::sync::atomic::AtomicUsize;
+      pub(crate) use ::core::sync::atomic::Ordering;
+    }
+  }
+
   #[cfg(loom)]
   mod exports {
     pub(crate) mod atomic {
@@ -168,12 +180,12 @@ mod sync {
     }
   }
 
-  #[cfg(not(loom))]
+  #[cfg(shuttle)]
   mod exports {
     pub(crate) mod atomic {
-      pub(crate) use ::core::sync::atomic::AtomicU32;
-      pub(crate) use ::core::sync::atomic::AtomicUsize;
-      pub(crate) use ::core::sync::atomic::Ordering;
+      pub(crate) use ::shuttle::sync::atomic::AtomicU32;
+      pub(crate) use ::shuttle::sync::atomic::AtomicUsize;
+      pub(crate) use ::shuttle::sync::atomic::Ordering;
     }
   }
 

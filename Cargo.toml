@@ -42,11 +42,19 @@ slow = []
 # versions of ptab may make breaking changes to it at any time.
 loom = ["dep:loom"]
 
+shuttle = ["dep:shuttle"]
+
 [target."cfg(loom)".dependencies]
 loom = { version = "0.7", default-features = false, optional = true }
 
 [target."cfg(loom)".dev-dependencies]
 loom = { version = "0.7", default-features = false }
+
+[target."cfg(shuttle)".dependencies]
+shuttle = { version = "0.8", default-features = false, optional = true }
+
+[target."cfg(shuttle)".dev-dependencies]
+shuttle = { version = "0.8", default-features = false }
 
 [[bench]]
 name = "compare"
@@ -73,7 +81,7 @@ rust-2024-compatibility = { level = "deny", priority = -1 }
 unused = { level = "deny", priority = -1 }
 
 # Standalone Lints
-unexpected_cfgs = { level = "warn", check-cfg = ["cfg(loom)"] }
+unexpected_cfgs = { level = "warn", check-cfg = ["cfg(loom)", "cfg(shuttle)"] }
 
 # ------------------------------------------------------------------------------
 # Clippy Lints
