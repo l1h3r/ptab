@@ -116,3 +116,29 @@ jobs:
       - run: cargo bench --no-fail-fast --benches
         env:
           DIVAN_MAX_TIME: 2
+
+  asan:
+    name: Address Sanitizer
+    needs: pre_ci
+    if: needs.pre_ci.outputs.continue
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@nightly
+      - run: cargo test --target x86_64-unknown-linux-gnu
+        env:
+          RUSTFLAGS: -Zsanitizer=address
+
+  tsan:
+    name: Thread Sanitizer
+    needs: pre_ci
+    if: needs.pre_ci.outputs.continue
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@nightly
+      - run: cargo test --target x86_64-unknown-linux-gnu
+        env:
+          RUSTFLAGS: -Zsanitizer=thread
