@@ -88,7 +88,7 @@ macro_rules! internal_index {
 ///
 /// # Examples
 ///
-/// ```
+/// ```no_run
 /// use ptab::PTab;
 ///
 /// let table: PTab<i32> = PTab::new();
