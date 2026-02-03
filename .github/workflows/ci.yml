@@ -49,7 +49,7 @@ jobs:
           toolchain: ${{matrix.rust}}
       - run: ./bin/loom.sh
 
-  loom:
+  shuttle:
     name: Shuttle ${{matrix.rust}}
     needs: pre_ci
     if: needs.pre_ci.outputs.continue
