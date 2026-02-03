@@ -49,6 +49,23 @@ jobs:
           toolchain: ${{matrix.rust}}
       - run: ./bin/loom.sh
 
+  shuttle:
+    name: Shuttle ${{matrix.rust}}
+    needs: pre_ci
+    if: needs.pre_ci.outputs.continue
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        rust: [nightly, beta, stable]
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{matrix.rust}}
+      - run: ./bin/shuttle.sh
+
   msrv:
     name: Rust 1.91.0
     needs: pre_ci
