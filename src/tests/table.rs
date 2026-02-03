@@ -344,6 +344,7 @@ fn test_min_capacity_operations() {
   assert!(!table.exists(index));
 }
 
+#[cfg(not(miri))]
 #[test]
 fn test_max_capacity_operations() {
   type Params = ConstParams<{ Capacity::MAX.as_usize() }>;
