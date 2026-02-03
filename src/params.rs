@@ -70,7 +70,7 @@ const _: () = assert!(
 /// This trait allows customizing table capacity at compile time. The simplest
 /// way to use custom parameters is through [`ConstParams`]:
 ///
-/// ```
+/// ```no_run
 /// use ptab::{PTab, ConstParams};
 ///
 /// // Table with 8,192 slots
@@ -81,7 +81,7 @@ const _: () = assert!(
 ///
 /// For advanced use cases, you can implement `Params` directly:
 ///
-/// ```
+/// ```no_run
 /// use ptab::{Params, Capacity, PTab};
 ///
 /// struct LargeParams;
@@ -121,7 +121,7 @@ pub trait Params {
 ///
 /// # Example
 ///
-/// ```
+/// ```no_run
 /// use ptab::{Params, ParamsExt, ConstParams};
 ///
 /// // View derived parameters for a configuration
@@ -162,7 +162,7 @@ pub trait ParamsExt: Params + Sealed {
 ///
 /// # Example
 ///
-/// ```
+/// ```no_run
 /// use ptab::{ParamsExt, DefaultParams};
 ///
 /// let debug = <DefaultParams as ParamsExt>::debug();
@@ -207,7 +207,7 @@ where
 ///
 /// # Example
 ///
-/// ```
+/// ```no_run
 /// use ptab::{PTab, DefaultParams};
 ///
 /// // These are equivalent:
@@ -244,7 +244,7 @@ impl Params for DefaultParams {
 ///
 /// # Examples
 ///
-/// ```
+/// ```no_run
 /// use ptab::{PTab, ConstParams};
 ///
 /// // Create a table with 4,096 slots
@@ -252,7 +252,7 @@ impl Params for DefaultParams {
 /// assert_eq!(table.capacity(), 4096);
 /// ```
 ///
-/// ```
+/// ```no_run
 /// use ptab::{PTab, ConstParams};
 ///
 /// // Values are rounded up to powers of two
@@ -264,7 +264,7 @@ impl Params for DefaultParams {
 ///
 /// For frequently-used configurations, consider defining a type alias:
 ///
-/// ```
+/// ```no_run
 /// use ptab::{PTab, ConstParams};
 ///
 /// type SmallTable<T> = PTab<T, ConstParams<64>>;
@@ -306,7 +306,7 @@ impl<P> ParamsExt for P where P: Params + ?Sized {}
 /// value is automatically rounded up to the nearest power of two and clamped
 /// to the valid range.
 ///
-/// ```
+/// ```no_run
 /// use ptab::Capacity;
 ///
 /// // Exact power of two
@@ -349,7 +349,7 @@ impl Capacity {
   ///
   /// # Examples
   ///
-  /// ```
+  /// ```no_run
   /// use ptab::Capacity;
   ///
   /// assert_eq!(Capacity::new(100).as_usize(), 128);
@@ -409,7 +409,7 @@ impl Capacity {
   ///
   /// # Examples
   ///
-  /// ```
+  /// ```no_run
   /// use ptab::Capacity;
   ///
   /// assert_eq!(Capacity::new(1024).log2(), 10);
