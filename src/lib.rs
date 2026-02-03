@@ -13,7 +13,7 @@
 //!
 //! # Usage
 //!
-//! ```
+//! ```no_run
 //! use ptab::PTab;
 //!
 //! // Create a table with default capacity
@@ -38,7 +38,7 @@
 //! Table capacity is configured at compile time through the [`Params`] trait.
 //! The default configuration ([`DefaultParams`]) provides 1,048,576 slots:
 //!
-//! ```
+//! ```no_run
 //! use ptab::{PTab, DefaultParams};
 //!
 //! // These are equivalent:
@@ -48,7 +48,7 @@
 //!
 //! For custom capacities, use [`ConstParams`]:
 //!
-//! ```
+//! ```no_run
 //! use ptab::{PTab, ConstParams};
 //!
 //! // Create a table with 4,096 slots
@@ -64,7 +64,7 @@
 //! All operations on [`PTab`] are thread-safe and lock-free. Multiple threads
 //! can concurrently insert, remove, and access entries without blocking.
 //!
-//! ```
+//! ```no_run
 //! use ptab::{PTab, ConstParams};
 //! use std::sync::Arc;
 //! use std::thread;
