@@ -5,14 +5,14 @@ use std::sync::atomic::Ordering;
 use crate::index::Detached;
 use crate::params::Capacity;
 use crate::params::ConstParams;
-use crate::params::DefaultParams;
 use crate::table::Table;
 
 type TestParams = ConstParams<64>;
 
+#[cfg(not(miri))]
 #[test]
 fn test_new() {
-  let table: Table<usize, DefaultParams> = Table::new();
+  let table: Table<usize, ConstParams<{ Capacity::DEF.as_usize() }>> = Table::new();
 
   assert_eq!(table.cap(), Capacity::DEF.as_usize());
   assert_eq!(table.len(), 0);
