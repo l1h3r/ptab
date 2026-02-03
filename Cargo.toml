@@ -42,6 +42,10 @@ slow = []
 # versions of ptab may make breaking changes to it at any time.
 loom = ["dep:loom"]
 
+# Enable the use of shuttle for concurrency testing.
+#
+# This configuration option is outside of the normal semver guarantees: minor
+# versions of ptab may make breaking changes to it at any time.
 shuttle = ["dep:shuttle"]
 
 [target."cfg(loom)".dependencies]
