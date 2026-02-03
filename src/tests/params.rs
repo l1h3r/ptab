@@ -114,7 +114,6 @@ fn test_masks_and_shifts() {
   });
 }
 
-#[cfg_attr(not(feature = "slow"), ignore = "too slow")]
 #[test]
 fn test_entry_mask_covers_all_indices() {
   each_capacity!({

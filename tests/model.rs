@@ -140,7 +140,7 @@ fn test_insert_read() {
 
 #[test]
 fn test_insert_remove() {
-  shuttle::model(|| {
+  model::check(|| {
     let table: Table = Table::new();
     let index: Detached = table.insert(1).unwrap();
 

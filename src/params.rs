@@ -7,7 +7,6 @@ use core::marker::PhantomData;
 use core::mem;
 use core::num::NonZeroUsize;
 
-#[cfg(not(shuttle))]
 use sdd::AtomicOwned;
 
 use crate::padded::CachePadded;
@@ -17,13 +16,11 @@ use crate::sync::atomic::AtomicUsize;
 // SDD Sanity Check
 // -----------------------------------------------------------------------------
 
-#[cfg(not(shuttle))]
 const _: () = assert!(
   align_of::<AtomicOwned<()>>() == align_of::<AtomicUsize>(),
   "invalid system: atomic owned align != atomic usize align",
 );
 
-#[cfg(not(shuttle))]
 const _: () = assert!(
   size_of::<AtomicOwned<()>>() == size_of::<AtomicUsize>(),
   "invalid system: atomic owned width != atomic usize width",
@@ -49,7 +46,6 @@ pub const CACHE_LINE: usize = size_of::<CachePadded<u8>>();
 /// cache lines. See [`CACHE_LINE`] for more details.
 pub const CACHE_LINE_SLOTS: usize = CACHE_LINE / size_of::<AtomicUsize>();
 
-#[cfg(not(shuttle))]
 const _: () = assert!(
   CACHE_LINE.is_multiple_of(size_of::<AtomicUsize>()),
   "invalid params: `CACHE_LINE` must be a multiple of pointer width",

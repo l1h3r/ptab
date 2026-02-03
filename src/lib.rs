@@ -183,8 +183,30 @@ mod sync {
   #[cfg(shuttle)]
   mod exports {
     pub(crate) mod atomic {
+      #[repr(transparent)]
+      pub(crate) struct AtomicUsize {
+        inner: Box<::shuttle::sync::atomic::AtomicUsize>,
+      }
+
+      impl AtomicUsize {
+        #[inline]
+        pub(crate) fn new(value: usize) -> Self {
+          Self {
+            inner: Box::new(::shuttle::sync::atomic::AtomicUsize::new(value)),
+          }
+        }
+      }
+
+      impl ::core::ops::Deref for AtomicUsize {
+        type Target = ::shuttle::sync::atomic::AtomicUsize;
+
+        #[inline]
+        fn deref(&self) -> &Self::Target {
+          &self.inner
+        }
+      }
+
       pub(crate) use ::shuttle::sync::atomic::AtomicU32;
-      pub(crate) use ::shuttle::sync::atomic::AtomicUsize;
       pub(crate) use ::shuttle::sync::atomic::Ordering;
     }
   }

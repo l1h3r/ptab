@@ -29,7 +29,6 @@ fn test_abstract_to_concrete_covers_all_slots() {
   });
 }
 
-#[cfg_attr(not(feature = "slow"), ignore = "too slow")]
 #[test]
 fn test_abstract_to_detached_roundtrip() {
   each_capacity!({
@@ -48,7 +47,6 @@ fn test_abstract_to_detached_roundtrip() {
   });
 }
 
-#[cfg_attr(not(feature = "slow"), ignore = "too slow")]
 #[test]
 fn test_detached_to_concrete_matches_direct_conversion() {
   each_capacity!({
@@ -96,7 +94,6 @@ fn test_cache_line_distribution() {
 }
 
 // This will take about a minute to run in debug mode, sorry
-#[cfg_attr(not(feature = "slow"), ignore = "too slow")]
 #[test]
 fn test_serial_number_preservation() {
   each_capacity!({
