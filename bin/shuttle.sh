@@ -15,4 +15,5 @@
 set -euo pipefail
 
 RUSTFLAGS="${RUSTFLAGS:-} --cfg shuttle -C debug-assertions=on" \
+    SHUTTLE_SILENCE_WARNINGS="${SHUTTLE_SILENCE_WARNINGS:-1}" \
     cargo test --features shuttle --release --tests "$@"
