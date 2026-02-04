@@ -203,6 +203,12 @@ where
     }
 
     // Table is full; undo the increment.
+    self.restore_slot(prev)
+  }
+
+  #[cold]
+  #[inline(never)]
+  fn restore_slot(&self, prev: u32) -> Option<Permit<'_, T, P>> {
     let mut current: u32 = prev + 1;
 
     while let Err(next) =
