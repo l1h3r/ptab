@@ -278,6 +278,8 @@ where
     data
   }
 
+  #[cold]
+  #[inline(never)]
   fn drop_slow(&mut self) {
     let count: u32 = self.len();
 
