@@ -27,11 +27,6 @@ rustdoc-args = [
 [dependencies]
 sdd = { version = "4.6", default-features = false }
 
-[dev-dependencies]
-divan = { version = "0.1", default-features = false, features = ["wrap_help"] }
-idr-ebr = { version = "0.3", default-features = false }
-sharded-slab = { version = "0.1", default-features = false }
-
 [features]
 # Enable tests that are generally quite slow.
 slow = []
@@ -59,10 +54,6 @@ shuttle = { version = "0.8", default-features = false, optional = true }
 
 [target."cfg(shuttle)".dev-dependencies]
 shuttle = { version = "0.8", default-features = false }
-
-[[bench]]
-name = "compare"
-harness = false
 
 # ------------------------------------------------------------------------------
 # Rustc Lints
