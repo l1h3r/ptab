@@ -230,7 +230,7 @@ where
         .readonly
         .slot
         .get(Concrete::from_abstract(self.volatile.fetch_next_id()))
-        .swap(RESERVED, AcqRel);
+        .swap(RESERVED, Relaxed);
 
       if result != RESERVED {
         return Abstract::new(result);
