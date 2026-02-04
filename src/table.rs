@@ -35,9 +35,22 @@ use crate::sync::atomic::Ordering::Release;
 const RESERVED: usize = usize::MAX;
 
 #[inline]
-fn store<T: 'static>(atomic: &AtomicOwned<T>, value: T, order: Ordering) {
-  let new: Owned<T> = Owned::new(value);
-  let prv: (Option<Owned<T>>, Tag) = atomic.swap((Some(new), Tag::None), order);
+fn store<F, T>(atomic: &AtomicOwned<T>, init: F, index: Detached)
+where
+  T: 'static,
+  F: FnOnce(&mut MaybeUninit<T>, Detached),
+{
+  let new: Owned<T> = Owned::new_with(|| {
+    let mut uninit: MaybeUninit<T> = MaybeUninit::uninit();
+
+    init(&mut uninit, index);
+
+    // SAFETY: The caller is required to fully initialize the `MaybeUninit<T>`
+    // before returning from the `init` callback.
+    unsafe { uninit.assume_init() }
+  });
+
+  let prv: (Option<Owned<T>>, Tag) = atomic.swap((Some(new), Tag::None), Release);
 
   debug_assert!(prv.0.is_none(), "AtomicOwned<T> is occupied!");
   debug_assert!(prv.1 == Tag::None, "AtomicOwned<T> is tagged!");
@@ -117,11 +130,7 @@ where
     let concrete_idx: Concrete<P> = Concrete::from_abstract(abstract_idx);
     let detached_idx: Detached = Detached::from_abstract(abstract_idx);
 
-    store(
-      self.readonly.data.get(concrete_idx),
-      Self::init(init, detached_idx),
-      Release,
-    );
+    store(self.readonly.data.get(concrete_idx), init, detached_idx);
 
     Some(detached_idx)
   }
@@ -249,20 +258,6 @@ where
       .compare_exchange_weak(RESERVED, data, Relaxed, Relaxed)
       .is_err()
     {}
-  }
-
-  #[inline]
-  fn init<F>(init: F, index: Detached) -> T
-  where
-    F: FnOnce(&mut MaybeUninit<T>, Detached),
-  {
-    let mut uninit: MaybeUninit<T> = MaybeUninit::uninit();
-
-    init(&mut uninit, index);
-
-    // SAFETY: The caller is required to fully initialize the `MaybeUninit<T>`
-    // before returning from the `init` callback.
-    unsafe { uninit.assume_init() }
   }
 
   /// Computes the next abstract index for a slot being released.
