@@ -75,7 +75,7 @@ jobs:
     steps:
       - uses: actions/checkout@v6
       - uses: dtolnay/rust-toolchain@1.91.0
-      - run: cargo check
+      - run: cargo check --all-targets --all-features
 
   doc:
     name: Documentation
@@ -113,7 +113,7 @@ jobs:
     steps:
       - uses: actions/checkout@v6
       - uses: dtolnay/rust-toolchain@clippy
-      - run: cargo clippy --tests
+      - run: cargo clippy --all-targets
 
   asan:
     name: Address Sanitizer
@@ -126,10 +126,9 @@ jobs:
       - uses: dtolnay/rust-toolchain@nightly
         with:
           components: rust-src
-      - run: cargo test -Zbuild-std --target x86_64-unknown-linux-gnu
+      - run: cargo test --features slow --lib --target x86_64-unknown-linux-gnu -Zbuild-std
         env:
           RUSTFLAGS: -Zsanitizer=address
-          RUSTDOCFLAGS: -Zsanitizer=address
           ASAN_OPTIONS: detect_leaks=0
 
   tsan:
@@ -143,7 +142,6 @@ jobs:
       - uses: dtolnay/rust-toolchain@nightly
         with:
           components: rust-src
-      - run: cargo test -Zbuild-std --target x86_64-unknown-linux-gnu
+      - run: cargo test --features slow --lib --target x86_64-unknown-linux-gnu -Zbuild-std
         env:
           RUSTFLAGS: -Zsanitizer=thread
-          RUSTDOCFLAGS: -Zsanitizer=thread
