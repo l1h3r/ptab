@@ -191,6 +191,7 @@ where
     abstract_to_concrete(other)
   }
 
+  #[inline]
   pub(crate) const fn from_detached(other: Detached) -> Self {
     detached_to_concrete(other)
   }

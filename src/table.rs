@@ -35,9 +35,22 @@ use crate::sync::atomic::Ordering::Release;
 const RESERVED: usize = usize::MAX;
 
 #[inline]
-fn store<T: 'static>(atomic: &AtomicOwned<T>, value: T, order: Ordering) {
-  let new: Owned<T> = Owned::new(value);
-  let prv: (Option<Owned<T>>, Tag) = atomic.swap((Some(new), Tag::None), order);
+fn store<F, T>(atomic: &AtomicOwned<T>, init: F, index: Detached)
+where
+  T: 'static,
+  F: FnOnce(&mut MaybeUninit<T>, Detached),
+{
+  let new: Owned<T> = Owned::new_with(|| {
+    let mut uninit: MaybeUninit<T> = MaybeUninit::uninit();
+
+    init(&mut uninit, index);
+
+    // SAFETY: The caller is required to fully initialize the `MaybeUninit<T>`
+    // before returning from the `init` callback.
+    unsafe { uninit.assume_init() }
+  });
+
+  let prv: (Option<Owned<T>>, Tag) = atomic.swap((Some(new), Tag::None), Release);
 
   debug_assert!(prv.0.is_none(), "AtomicOwned<T> is occupied!");
   debug_assert!(prv.1 == Tag::None, "AtomicOwned<T> is tagged!");
@@ -117,11 +130,7 @@ where
     let concrete_idx: Concrete<P> = Concrete::from_abstract(abstract_idx);
     let detached_idx: Detached = Detached::from_abstract(abstract_idx);
 
-    store(
-      self.readonly.data.get(concrete_idx),
-      Self::init(init, detached_idx),
-      Release,
-    );
+    store(self.readonly.data.get(concrete_idx), init, detached_idx);
 
     Some(detached_idx)
   }
@@ -203,6 +212,12 @@ where
     }
 
     // Table is full; undo the increment.
+    self.restore_slot(prev)
+  }
+
+  #[cold]
+  #[inline(never)]
+  fn restore_slot(&self, prev: u32) -> Option<Permit<'_, T, P>> {
     let mut current: u32 = prev + 1;
 
     while let Err(next) =
@@ -224,7 +239,7 @@ where
         .readonly
         .slot
         .get(Concrete::from_abstract(self.volatile.fetch_next_id()))
-        .swap(RESERVED, AcqRel);
+        .swap(RESERVED, Relaxed);
 
       if result != RESERVED {
         return Abstract::new(result);
@@ -245,20 +260,6 @@ where
     {}
   }
 
-  #[inline]
-  fn init<F>(init: F, index: Detached) -> T
-  where
-    F: FnOnce(&mut MaybeUninit<T>, Detached),
-  {
-    let mut uninit: MaybeUninit<T> = MaybeUninit::uninit();
-
-    init(&mut uninit, index);
-
-    // SAFETY: The caller is required to fully initialize the `MaybeUninit<T>`
-    // before returning from the `init` callback.
-    unsafe { uninit.assume_init() }
-  }
-
   /// Computes the next abstract index for a slot being released.
   ///
   /// Advances the generation by adding capacity, ensuring the same concrete
@@ -277,6 +278,8 @@ where
     data
   }
 
+  #[cold]
+  #[inline(never)]
   fn drop_slow(&mut self) {
     let count: u32 = self.len();
 
