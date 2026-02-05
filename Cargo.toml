@@ -27,11 +27,6 @@ rustdoc-args = [
 [dependencies]
 sdd = { version = "4.6", default-features = false }
 
-[dev-dependencies]
-divan = { version = "0.1", default-features = false, features = ["wrap_help"] }
-idr-ebr = { version = "0.3", default-features = false }
-sharded-slab = { version = "0.1", default-features = false }
-
 [features]
 # Enable tests that are generally quite slow.
 slow = []
@@ -42,15 +37,23 @@ slow = []
 # versions of ptab may make breaking changes to it at any time.
 loom = ["dep:loom"]
 
+# Enable the use of shuttle for concurrency testing.
+#
+# This configuration option is outside of the normal semver guarantees: minor
+# versions of ptab may make breaking changes to it at any time.
+shuttle = ["dep:shuttle"]
+
 [target."cfg(loom)".dependencies]
 loom = { version = "0.7", default-features = false, optional = true }
 
 [target."cfg(loom)".dev-dependencies]
 loom = { version = "0.7", default-features = false }
 
-[[bench]]
-name = "compare"
-harness = false
+[target."cfg(shuttle)".dependencies]
+shuttle = { version = "0.8", default-features = false, optional = true }
+
+[target."cfg(shuttle)".dev-dependencies]
+shuttle = { version = "0.8", default-features = false }
 
 # ------------------------------------------------------------------------------
 # Rustc Lints
@@ -73,7 +76,7 @@ rust-2024-compatibility = { level = "deny", priority = -1 }
 unused = { level = "deny", priority = -1 }
 
 # Standalone Lints
-unexpected_cfgs = { level = "warn", check-cfg = ["cfg(loom)"] }
+unexpected_cfgs = { level = "warn", check-cfg = ["cfg(loom)", "cfg(shuttle)"] }
 
 # ------------------------------------------------------------------------------
 # Clippy Lints

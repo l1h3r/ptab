@@ -29,16 +29,6 @@ assert!(table.remove(index));
 assert_eq!(table.read(index), None);
 ```
 
-## Performance
-
-Under contention (16 threads reading a single hot key):
-
-|            | ptab    | sharded-slab |
-|------------|--------:|-------------:|
-| Throughput | 212 M/s |      155 K/s |
-
-Use `ptab` when reads dominate. Use [`sharded-slab`] for write-heavy workloads or dynamic capacity.
-
 ## Design
 
 See [`IMPLEMENTATION.md`] for details.

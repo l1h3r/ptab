@@ -49,6 +49,23 @@ jobs:
           toolchain: ${{matrix.rust}}
       - run: ./bin/loom.sh
 
+  shuttle:
+    name: Shuttle ${{matrix.rust}}
+    needs: pre_ci
+    if: needs.pre_ci.outputs.continue
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        rust: [nightly, beta, stable]
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{matrix.rust}}
+      - run: ./bin/shuttle.sh
+
   msrv:
     name: Rust 1.91.0
     needs: pre_ci
@@ -97,19 +114,6 @@ jobs:
       - uses: actions/checkout@v6
       - uses: dtolnay/rust-toolchain@clippy
       - run: cargo clippy --tests
-
-  bench:
-    name: Benches
-    needs: pre_ci
-    if: needs.pre_ci.outputs.continue
-    runs-on: ubuntu-latest
-    timeout-minutes: 45
-    steps:
-      - uses: actions/checkout@v6
-      - uses: dtolnay/rust-toolchain@1.92.0
-      - run: cargo bench --no-fail-fast --benches
-        env:
-          DIVAN_MAX_TIME: 2
 
   asan:
     name: Address Sanitizer

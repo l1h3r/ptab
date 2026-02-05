@@ -1,8 +1,45 @@
-#![cfg(loom)]
+#![cfg(any(loom, shuttle))]
 
-use loom::sync::Arc;
-use loom::thread;
-use loom::thread::JoinHandle;
+mod model {
+  #[cfg(loom)]
+  mod export {
+    pub use ::loom::sync::Arc;
+    pub use ::loom::thread;
+    pub use ::loom::thread::JoinHandle;
+
+    #[inline]
+    pub fn check<F>(f: F)
+    where
+      F: Fn() + Sync + Send + 'static,
+    {
+      loom::model(f);
+    }
+  }
+
+  #[cfg(shuttle)]
+  mod export {
+    pub use ::shuttle::sync::Arc;
+    pub use ::shuttle::thread;
+    pub use ::shuttle::thread::JoinHandle;
+
+    const ITERATIONS: usize = 100_000;
+
+    #[inline]
+    pub fn check<F>(f: F)
+    where
+      F: Fn() + Sync + Send + 'static,
+    {
+      shuttle::check_random(f, ITERATIONS);
+    }
+  }
+
+  pub use self::export::*;
+}
+
+use self::model::Arc;
+use self::model::thread;
+use self::model::JoinHandle;
+
 use std::ops::Deref;
 
 use ptab::Capacity;
@@ -18,14 +55,14 @@ type Reader<T = usize> = JoinHandle<Option<T>>;
 
 type ArcTable = Arc<PTab<usize, ConstParams<{ Capacity::MIN.as_usize() }>>>;
 
-struct LoomTable {
+struct Table {
   inner: ArcTable,
 }
 
-impl LoomTable {
+impl Table {
   fn new() -> Self {
     Self {
-      inner: Arc::new(PTab::new()),
+      inner: ArcTable::new(PTab::new()),
     }
   }
 
@@ -51,15 +88,15 @@ impl LoomTable {
 
   fn spawn_reader<T, F>(&self, index: Detached, f: F) -> Reader<T>
   where
-    T: 'static,
-    F: Fn(&usize) -> T + 'static,
+    T: Send + 'static,
+    F: Send + 'static + Fn(&usize) -> T,
   {
     let table: ArcTable = ArcTable::clone(&self.inner);
     thread::spawn(move || table.with(index, f))
   }
 }
 
-impl Deref for LoomTable {
+impl Deref for Table {
   type Target = ArcTable;
 
   #[inline]
@@ -70,8 +107,8 @@ impl Deref for LoomTable {
 
 #[test]
 fn test_insert() {
-  loom::model(|| {
-    let table: LoomTable = LoomTable::new();
+  model::check(|| {
+    let table: Table = Table::new();
 
     let thread_a: Insert = table.spawn_insert(1);
     let thread_b: Insert = table.spawn_insert(2);
@@ -89,8 +126,8 @@ fn test_insert() {
 
 #[test]
 fn test_insert_read() {
-  loom::model(|| {
-    let table: LoomTable = LoomTable::new();
+  model::check(|| {
+    let table: Table = Table::new();
     let index: Detached = table.insert(123).unwrap();
 
     let insert: Insert = table.spawn_insert(100);
@@ -103,8 +140,8 @@ fn test_insert_read() {
 
 #[test]
 fn test_insert_remove() {
-  loom::model(|| {
-    let table: LoomTable = LoomTable::new();
+  model::check(|| {
+    let table: Table = Table::new();
     let index: Detached = table.insert(1).unwrap();
 
     let insert: Insert = table.spawn_insert(2);
@@ -118,8 +155,8 @@ fn test_insert_remove() {
 
 #[test]
 fn test_insert_remove_read() {
-  loom::model(|| {
-    let table: LoomTable = LoomTable::new();
+  model::check(|| {
+    let table: Table = Table::new();
     let index: Detached = table.insert(123).unwrap();
 
     let insert: Insert = table.spawn_insert(456);
@@ -137,8 +174,8 @@ fn test_insert_remove_read() {
 
 #[test]
 fn test_remove() {
-  loom::model(|| {
-    let table: LoomTable = LoomTable::new();
+  model::check(|| {
+    let table: Table = Table::new();
     let index_a: Detached = table.insert(1).unwrap();
     let index_b: Detached = table.insert(2).unwrap();
 
@@ -157,8 +194,8 @@ fn test_remove() {
 
 #[test]
 fn test_remove_race() {
-  loom::model(|| {
-    let table: LoomTable = LoomTable::new();
+  model::check(|| {
+    let table: Table = Table::new();
     let index: Detached = table.insert(123).unwrap();
 
     let remove_a: Remove = table.spawn_remove(index);
@@ -177,8 +214,8 @@ fn test_remove_race() {
 
 #[test]
 fn test_remove_race_read() {
-  loom::model(|| {
-    let table: LoomTable = LoomTable::new();
+  model::check(|| {
+    let table: Table = Table::new();
     let index: Detached = table.insert(123).unwrap();
 
     let lookup: Lookup = table.spawn_lookup(index);
@@ -194,8 +231,8 @@ fn test_remove_race_read() {
 
 #[test]
 fn test_remove_race_read_multi() {
-  loom::model(|| {
-    let table: LoomTable = LoomTable::new();
+  model::check(|| {
+    let table: Table = Table::new();
     let index: Detached = table.insert(123).unwrap();
 
     let lookup_a: Lookup = table.spawn_lookup(index);
@@ -215,8 +252,8 @@ fn test_remove_race_read_multi() {
 
 #[test]
 fn test_remove_race_exists() {
-  loom::model(|| {
-    let table: LoomTable = LoomTable::new();
+  model::check(|| {
+    let table: Table = Table::new();
     let index: Detached = table.insert(123).unwrap();
 
     let exists: Exists = table.spawn_exists(index);
@@ -231,8 +268,8 @@ fn test_remove_race_exists() {
 
 #[test]
 fn test_remove_race_with() {
-  loom::model(|| {
-    let table: LoomTable = LoomTable::new();
+  model::check(|| {
+    let table: Table = Table::new();
     let index: Detached = table.insert(123).unwrap();
 
     let reader: Reader = table.spawn_reader(index, |value| *value * 2);
@@ -248,8 +285,8 @@ fn test_remove_race_with() {
 
 #[test]
 fn test_capacity_race() {
-  loom::model(|| {
-    let table: LoomTable = LoomTable::new();
+  model::check(|| {
+    let table: Table = Table::new();
 
     for index in 0..table.capacity() - 1 {
       let _index: Detached = table.insert(index).unwrap();
@@ -270,8 +307,8 @@ fn test_capacity_race() {
 
 #[test]
 fn test_length_consistency() {
-  loom::model(|| {
-    let table: LoomTable = LoomTable::new();
+  model::check(|| {
+    let table: Table = Table::new();
 
     let thread_a: JoinHandle<()> = {
       let table: ArcTable = ArcTable::clone(&table.inner);
@@ -293,8 +330,8 @@ fn test_length_consistency() {
 
 #[test]
 fn test_length_insert_remove() {
-  loom::model(|| {
-    let table: LoomTable = LoomTable::new();
+  model::check(|| {
+    let table: Table = Table::new();
     let index: Detached = table.insert(1).unwrap();
 
     let insert: Insert = table.spawn_insert(2);
@@ -309,8 +346,8 @@ fn test_length_insert_remove() {
 
 #[test]
 fn remove_and_reinsert() {
-  loom::model(|| {
-    let table: LoomTable = LoomTable::new();
+  model::check(|| {
+    let table: Table = Table::new();
     let mut keys: Vec<Detached> = Vec::with_capacity(table.capacity());
 
     for index in 0..table.capacity() {
@@ -333,8 +370,8 @@ fn remove_and_reinsert() {
 
 #[test]
 fn test_three_way_insert() {
-  loom::model(|| {
-    let table: LoomTable = LoomTable::new();
+  model::check(|| {
+    let table: Table = Table::new();
 
     let insert_a: Insert = table.spawn_insert(1);
     let insert_b: Insert = table.spawn_insert(2);
@@ -358,8 +395,8 @@ fn test_three_way_insert() {
 
 #[test]
 fn test_concurrent_remove_reinsert() {
-  loom::model(|| {
-    let table: LoomTable = LoomTable::new();
+  model::check(|| {
+    let table: Table = Table::new();
     let mut keys: Vec<Detached> = Vec::with_capacity(table.capacity());
 
     for index in 0..table.capacity() {
@@ -398,8 +435,8 @@ fn test_concurrent_remove_reinsert() {
 
 #[test]
 fn test_read_unaffected_by_other_remove() {
-  loom::model(|| {
-    let table: LoomTable = LoomTable::new();
+  model::check(|| {
+    let table: Table = Table::new();
     let index_a: Detached = table.insert(111).unwrap();
     let index_b: Detached = table.insert(222).unwrap();
 
