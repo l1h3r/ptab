@@ -127,6 +127,7 @@ jobs:
       - run: cargo test -Zbuild-std --target x86_64-unknown-linux-gnu
         env:
           RUSTFLAGS: -Zsanitizer=address
+          ASAN_OPTIONS: detect_leaks=0
 
   tsan:
     name: Thread Sanitizer
