@@ -232,6 +232,29 @@ where
     None
   }
 
+  #[cfg(target_feature = "lse")]
+  #[inline]
+  fn acquire_slot(&self, _permit: Permit<'_, T, P>) -> Abstract<P> {
+    loop {
+      let abstract_idx: Abstract<P> = self.volatile.fetch_next_id();
+      let concrete_idx: Concrete<P> = Concrete::from_abstract(abstract_idx);
+
+      let atomic: &AtomicUsize = self.readonly.slot.get(concrete_idx);
+      let result: usize = atomic.load(Relaxed);
+
+      if result == RESERVED {
+        continue;
+      }
+
+      if atomic.compare_exchange_weak(result, RESERVED, Relaxed, Relaxed).is_ok() {
+        return Abstract::new(result);
+      } else {
+        hint::spin_loop();
+      }
+    }
+  }
+
+  #[cfg(not(target_feature = "lse"))]
   #[inline]
   fn acquire_slot(&self, _permit: Permit<'_, T, P>) -> Abstract<P> {
     loop {
@@ -472,3 +495,33 @@ where
     }
   }
 }
+
+// #[inline(always)]
+// #[cfg(target_arch = "aarch64")]
+// unsafe fn prefetch_read<T>(ptr: *const T) {
+//   unsafe {
+//     core::arch::asm!(
+//       "prfm pldl1keep, [{ptr}]",
+//       ptr = in(reg) ptr,
+//       options(nostack, preserves_flags, readonly)
+//     );
+//   }
+// }
+
+// #[inline(always)]
+// #[cfg(target_arch = "x86_64")]
+// unsafe fn prefetch_read<T>(ptr: *const T) {
+//   unsafe {
+//     core::arch::asm!(
+//       "prefetcht0 [{ptr}]",
+//       ptr = in(reg) ptr,
+//       options(nostack, preserves_flags, readonly)
+//     );
+//   }
+// }
+
+// #[inline(always)]
+// #[cfg(not(any(target_arch = "aarch64", target_arch = "x86_64")))]
+// unsafe fn prefetch_read<T>(_ptr: *const T) {
+//   // do nothing
+// }
