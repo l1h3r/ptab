@@ -1,4 +1,7 @@
 //! Index types and conversions.
+//!
+//! Provides [`Detached`], the public index type, and internal index types for
+//! abstract and concrete slot addressing.
 
 use core::fmt::Debug;
 use core::fmt::Display;
@@ -76,15 +79,14 @@ macro_rules! internal_index {
 
 /// An opaque index identifying an entry in a [`PTab`].
 ///
-/// `Detached` values are returned by [`PTab::insert`] and [`PTab::write`],
-/// and can be used to access or remove entries.
+/// Returned by [`PTab::insert`] and [`PTab::write`]; used to access or remove
+/// entries.
 ///
 /// # Generational Indices
 ///
 /// Each index contains a generational component that changes when a slot is
-/// reused. This helps mitigate the [ABA problem] in concurrent algorithms:
-/// a stale index from a removed entry will not accidentally match a new entry
-/// that happens to occupy the same slot.
+/// reused. This mitigates the [ABA problem]: a stale index from a removed
+/// entry will not match a new entry occupying the same slot.
 ///
 /// # Examples
 ///
@@ -103,9 +105,9 @@ macro_rules! internal_index {
 /// assert_eq!(table.read(idx2), Some(42));
 /// ```
 ///
-/// [`PTab`]: crate::PTab
-/// [`PTab::insert`]: crate::PTab::insert
-/// [`PTab::write`]: crate::PTab::write
+/// [`PTab`]: crate::public::PTab
+/// [`PTab::insert`]: crate::public::PTab::insert
+/// [`PTab::write`]: crate::public::PTab::write
 /// [ABA problem]: https://en.wikipedia.org/wiki/ABA_problem
 #[derive(Clone, Copy, Hash, PartialEq, Eq, PartialOrd, Ord)]
 #[repr(transparent)]
@@ -114,16 +116,12 @@ pub struct Detached {
 }
 
 impl Detached {
-  /// Creates a `Detached` index from its raw bit representation.
-  ///
-  /// This is primarily useful for serialization or interop with external
-  /// systems that need to store indices as plain integers.
+  /// Creates a [`Detached`] index from its raw bit representation.
   ///
   /// # Warning
   ///
-  /// The returned index may not correspond to any valid entry. Using an
-  /// arbitrary bit pattern with table operations is safe but will likely
-  /// return `None` or `false`.
+  /// An arbitrary bit pattern may not correspond to any valid entry; using it
+  /// is safe but will return [`None`] or `false` from table operations.
   #[inline]
   pub const fn from_bits(bits: usize) -> Self {
     Self { bits }
@@ -131,7 +129,9 @@ impl Detached {
 
   /// Returns the raw bit representation of this index.
   ///
-  /// This is primarily useful for serialization or debugging.
+  /// See [`from_bits`] to reconstruct an index.
+  ///
+  /// [`from_bits`]: Self::from_bits
   #[inline]
   pub const fn into_bits(self) -> usize {
     self.bits
@@ -201,7 +201,7 @@ where
 // Index Mapping
 // -----------------------------------------------------------------------------
 
-/// Extracts the abstract sequential index from a detached index.
+/// Extracts the [`Abstract`] sequential index from a [`Detached`] index.
 #[inline]
 const fn detached_to_abstract<P>(detached: Detached) -> Abstract<P>
 where
@@ -213,7 +213,7 @@ where
   Abstract::new(value)
 }
 
-/// Extracts the concrete cache-aware index from a detached index.
+/// Extracts the [`Concrete`] cache-aware index from a [`Detached`] index.
 #[inline]
 const fn detached_to_concrete<P>(detached: Detached) -> Concrete<P>
 where
@@ -222,7 +222,7 @@ where
   Concrete::new(detached.into_bits() & P::ID_MASK_ENTRY)
 }
 
-/// Converts an abstract sequential index to concrete cache-aware index.
+/// Converts an [`Abstract`] sequential index to a [`Concrete`] cache-aware index.
 #[inline]
 const fn abstract_to_concrete<P>(abstract_idx: Abstract<P>) -> Concrete<P>
 where
@@ -234,7 +234,7 @@ where
   Concrete::new(value)
 }
 
-/// Converts abstract sequential index to detached index.
+/// Converts an [`Abstract`] sequential index to a [`Detached`] index.
 #[inline]
 const fn abstract_to_detached<P>(abstract_idx: Abstract<P>) -> Detached
 where

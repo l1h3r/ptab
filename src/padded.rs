@@ -1,4 +1,6 @@
 //! Cache-line padding to prevent false sharing.
+//!
+//! Provides [`CachePadded`], a wrapper that aligns its contents to a cache line.
 
 use core::fmt::Debug;
 use core::fmt::Display;
@@ -9,8 +11,11 @@ use core::ops::DerefMut;
 
 /// Pads and aligns a value to the length of a cache line.
 ///
-/// Taken from [`crossbeam-utils`]
+/// Alignment varies by architecture; see [`CACHE_LINE`] for the effective size.
 ///
+/// Based on [`crossbeam-utils`].
+///
+/// [`CACHE_LINE`]: crate::params::CACHE_LINE
 /// [`crossbeam-utils`]: https://crates.io/crates/crossbeam-utils
 #[cfg_attr(
   any(
@@ -53,21 +58,19 @@ use core::ops::DerefMut;
   )),
   repr(align(64))
 )]
-pub struct CachePadded<T> {
+pub(crate) struct CachePadded<T> {
   value: T,
 }
 
-// SAFETY: `CachePadded<T>` is a transparent wrapper with no additional state,
-// so it inherits `Send` from `T`.
+// SAFETY: Transparent wrapper; inherits `Send` from `T`.
 unsafe impl<T: Send> Send for CachePadded<T> {}
 
-// SAFETY: `CachePadded<T>` is a transparent wrapper with no additional state,
-// so it inherits `Sync` from `T`.
+// SAFETY: Transparent wrapper; inherits `Sync` from `T`.
 unsafe impl<T: Sync> Sync for CachePadded<T> {}
 
 impl<T> CachePadded<T> {
   #[inline]
-  pub const fn new(value: T) -> Self {
+  pub(crate) const fn new(value: T) -> Self {
     Self { value }
   }
 }
