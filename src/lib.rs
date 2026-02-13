@@ -36,7 +36,8 @@
 //! # Configuration
 //!
 //! Table capacity is configured at compile time through the [`Params`] trait.
-//! The default configuration ([`DefaultParams`]) provides 1,048,576 slots:
+//! The default configuration ([`DefaultParams`]) provides [`Capacity::DEF`]
+//! slots:
 //!
 //! ```no_run
 //! use ptab::{PTab, DefaultParams};
@@ -51,7 +52,6 @@
 //! ```no_run
 //! use ptab::{PTab, ConstParams};
 //!
-//! // Create a table with 4,096 slots
 //! let table: PTab<u64, ConstParams<4096>> = PTab::new();
 //! assert_eq!(table.capacity(), 4096);
 //! ```
@@ -91,29 +91,26 @@
 //!
 //! ## Memory Reclamation
 //!
-//! Removed entries are reclaimed using epoch-based memory management
-//! (via [`sdd`]). This ensures that concurrent readers can
-//! safely access entries even while other threads are removing them.
+//! Removed entries are reclaimed using epoch-based memory management via
+//! [`sdd`]. This ensures concurrent readers can safely access entries even
+//! while other threads are removing them.
 //!
 //! # Memory Layout
 //!
 //! The table uses a cache-line-aware memory layout to minimize false sharing
 //! between threads. Consecutive allocations are distributed across different
 //! cache lines, reducing contention when multiple threads operate on
-//! recently-allocated entries.
-//!
-//! The number of slots per cache line is available as [`CACHE_LINE_SLOTS`].
+//! recently-allocated entries. See [`CACHE_LINE_SLOTS`] for the distribution
+//! stride.
 //!
 //! # Capacity Limits
 //!
-//! - **Minimum**: 16 entries ([`Capacity::MIN`])
-//! - **Maximum**: 134,217,728 entries ([`Capacity::MAX`])
-//! - **Default**: 1,048,576 entries ([`Capacity::DEF`])
-//!
-//! When the table is full, [`PTab::insert`] returns `None`.
+//! Capacity is bounded by [`Capacity::MIN`] and [`Capacity::MAX`]. The default
+//! is [`Capacity::DEF`]. When full, [`PTab::insert`] returns [`None`].
 //!
 //! [ABA problem]: https://en.wikipedia.org/wiki/ABA_problem
 //! [`sdd`]: https://docs.rs/sdd
+//!
 
 mod array;
 mod index;

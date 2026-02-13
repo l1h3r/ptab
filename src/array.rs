@@ -1,4 +1,6 @@
-//! Cache-aligned array allocation for table storage.
+//! Cache-aligned array allocation.
+//!
+//! Provides [`Array`], the backing storage for table slots.
 
 use core::marker::PhantomData;
 use core::mem::ManuallyDrop;
@@ -38,12 +40,10 @@ where
     let mut index: usize = 0;
 
     while index < P::LENGTH.as_usize() {
-      // SAFETY: `index` is less than `P::LENGTH` and the allocation holds
-      // `P::LENGTH` elements.
+      // SAFETY: `index < P::LENGTH` and allocation holds `P::LENGTH` elements.
       let ptr: NonNull<MaybeUninit<T>> = unsafe { this.nonnull.add(index) };
 
-      // SAFETY: The pointer is valid, properly aligned, and we have exclusive
-      // access during initialization.
+      // SAFETY: Pointer is valid and aligned; we have exclusive access.
       let uninit: &mut MaybeUninit<T> = unsafe { &mut *ptr.as_ptr() };
 
       init(index, uninit);
@@ -51,7 +51,7 @@ where
       index += 1;
     }
 
-    // SAFETY: All `P::LENGTH` elements were initialized by the loop above.
+    // SAFETY: All `P::LENGTH` elements initialized by the loop.
     unsafe { this.assume_init() }
   }
 
@@ -61,8 +61,7 @@ where
   pub(crate) fn new_zeroed() -> Array<MaybeUninit<T>, P> {
     let this: Array<MaybeUninit<T>, P> = Self::new_uninit();
 
-    // SAFETY: The allocation is valid for `P::LENGTH` elements. Writing zeros
-    // to `MaybeUninit<T>` is always valid.
+    // SAFETY: Allocation holds `P::LENGTH` elements; zeroing `MaybeUninit` is valid.
     unsafe {
       this.nonnull.write_bytes(0, P::LENGTH.as_usize());
     }
@@ -101,15 +100,13 @@ where
 
   #[inline]
   pub(crate) const fn as_slice(&self) -> &[T] {
-    // SAFETY: The pointer addresses a contiguous allocation of `P::LENGTH`
-    // initialized elements.
+    // SAFETY: Contiguous allocation of `P::LENGTH` initialized elements.
     unsafe { slice::from_raw_parts(self.as_ptr(), P::LENGTH.as_usize()) }
   }
 
   #[inline]
   pub(crate) const fn as_mut_slice(&mut self) -> &mut [T] {
-    // SAFETY: The pointer addresses a contiguous allocation of `P::LENGTH`
-    // initialized elements.
+    // SAFETY: Contiguous allocation of `P::LENGTH` initialized elements.
     unsafe { slice::from_raw_parts_mut(self.as_mut_ptr(), P::LENGTH.as_usize()) }
   }
 
@@ -124,7 +121,9 @@ where
   ///
   /// # Safety
   ///
-  /// `index` must be less than `P::LENGTH`.
+  /// `index` must be less than [`P::LENGTH`].
+  ///
+  /// [`P::LENGTH`]: Params::LENGTH
   #[inline]
   pub(crate) const unsafe fn get_unchecked(&self, index: usize) -> &T {
     debug_assert!(
@@ -132,7 +131,7 @@ where
       "Array::get_unchecked requires that the index is in bounds",
     );
 
-    // SAFETY: Caller guarantees `index` is less than `P::LENGTH`.
+    // SAFETY: Caller guarantees `index < P::LENGTH`.
     unsafe { self.nonnull.add(index).as_ref() }
   }
 }
@@ -145,11 +144,13 @@ where
   ///
   /// # Safety
   ///
-  /// All elements must be initialized.
+  /// All [`P::LENGTH`] elements must be initialized.
+  ///
+  /// [`P::LENGTH`]: Params::LENGTH
   #[inline]
   pub(crate) unsafe fn assume_init(self) -> Array<T, P> {
     Array {
-      // Prevent drop from running on `self` (which would deallocate).
+      // Prevent drop from running on `self` (would deallocate).
       nonnull: ManuallyDrop::new(self).nonnull.cast(),
       phantom: PhantomData,
     }
@@ -161,7 +162,7 @@ where
   P: Params + ?Sized,
 {
   fn drop(&mut self) {
-    // SAFETY: The pointer was allocated with `P::LAYOUT` in `new_uninit`.
+    // SAFETY: Allocated with `P::LAYOUT` in `new_uninit`.
     unsafe {
       dealloc(self.nonnull.cast().as_ptr(), P::LAYOUT);
     }

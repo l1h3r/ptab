@@ -32,18 +32,15 @@ const _: () = assert!(
 
 /// The size of a cache line in bytes.
 ///
-/// This value is used to align table data structures to minimize false sharing
-/// between threads. On most modern x86-64 systems, this is 64 bytes.
-///
-/// The table distributes consecutive allocations across different cache lines
-/// to reduce contention when multiple threads operate on recently-allocated
-/// entries.
+/// Used to align table data structures to minimize false sharing. The table
+/// distributes consecutive allocations across different cache lines; see
+/// [`CACHE_LINE_SLOTS`] for the stride.
 pub const CACHE_LINE: usize = size_of::<CachePadded<u8>>();
 
 /// The number of table slots that fit in a single cache line.
 ///
-/// This determines the stride used when distributing allocations across
-/// cache lines. See [`CACHE_LINE`] for more details.
+/// Determines the stride for distributing allocations. Derived from
+/// [`CACHE_LINE`] and the pointer width.
 pub const CACHE_LINE_SLOTS: usize = CACHE_LINE / size_of::<AtomicUsize>();
 
 const _: () = assert!(
@@ -67,19 +64,18 @@ const _: () = assert!(
 
 /// Configuration parameters for a [`PTab`].
 ///
-/// This trait allows customizing table capacity at compile time. The simplest
-/// way to use custom parameters is through [`ConstParams`]:
+/// Allows customizing table capacity at compile time. The simplest approach
+/// is [`ConstParams`]:
 ///
 /// ```no_run
 /// use ptab::{PTab, ConstParams};
 ///
-/// // Table with 8,192 slots
 /// type MyTable<T> = PTab<T, ConstParams<8192>>;
 /// ```
 ///
 /// # Implementing `Params`
 ///
-/// For advanced use cases, you can implement `Params` directly:
+/// For advanced use cases, implement directly:
 ///
 /// ```no_run
 /// use ptab::{Params, Capacity, PTab};
@@ -91,13 +87,12 @@ const _: () = assert!(
 /// }
 ///
 /// let table: PTab<u64, LargeParams> = PTab::new();
-/// assert_eq!(table.capacity(), 1 << 20);
 /// ```
 ///
-/// Note that [`Capacity::new`] clamps values to the valid range and rounds
-/// up to the nearest power of two.
+/// [`Capacity::new`] clamps values to the valid range and rounds up to the
+/// nearest power of two.
 ///
-/// [`PTab`]: crate::PTab
+/// [`PTab`]: crate::public::PTab
 pub trait Params {
   /// The maximum number of entries the table can hold.
   ///
@@ -112,19 +107,14 @@ pub trait Params {
 
 /// Derived parameters computed from [`Params`].
 ///
-/// This trait is automatically implemented for all types that implement
-/// [`Params`]. It provides computed constants used internally by the table
-/// implementation.
-///
-/// Users generally do not need to interact with this trait directly, but
-/// it is exposed for advanced use cases such as debugging configuration.
+/// Automatically implemented for all [`Params`] types. Provides computed
+/// constants used internally.
 ///
 /// # Example
 ///
 /// ```no_run
-/// use ptab::{Params, ParamsExt, ConstParams};
+/// use ptab::{ParamsExt, ConstParams};
 ///
-/// // View derived parameters for a configuration
 /// println!("{:#?}", <ConstParams<1024> as ParamsExt>::debug());
 /// ```
 pub trait ParamsExt: Params + Sealed {
@@ -157,17 +147,8 @@ pub trait ParamsExt: Params + Sealed {
 
 /// A helper type for displaying [`Params`] configuration.
 ///
-/// This type is returned by [`ParamsExt::debug`] and implements [`Debug`]
-/// to display all derived configuration values.
-///
-/// # Example
-///
-/// ```no_run
-/// use ptab::{ParamsExt, DefaultParams};
-///
-/// let debug = <DefaultParams as ParamsExt>::debug();
-/// println!("{:#?}", debug);
-/// ```
+/// Returned by [`ParamsExt::debug`]; implements [`Debug`] to show all derived
+/// configuration values.
 #[derive(Clone, Copy)]
 pub struct DebugParams<P>
 where
@@ -200,10 +181,9 @@ where
 // Default Params
 // -----------------------------------------------------------------------------
 
-/// The default table configuration with 1,048,576 slots.
+/// The default table configuration with [`Capacity::DEF`] slots.
 ///
-/// This is the configuration used when creating a [`PTab`] without
-/// specifying a custom [`Params`] type.
+/// Used when creating a [`PTab`] without specifying a custom [`Params`] type.
 ///
 /// # Example
 ///
@@ -213,11 +193,9 @@ where
 /// // These are equivalent:
 /// let table1: PTab<u64> = PTab::new();
 /// let table2: PTab<u64, DefaultParams> = PTab::new();
-///
-/// assert_eq!(table1.capacity(), 1_048_576);
 /// ```
 ///
-/// [`PTab`]: crate::PTab
+/// [`PTab`]: crate::public::PTab
 #[derive(Clone, Copy)]
 #[non_exhaustive]
 pub struct DefaultParams;
@@ -238,16 +216,15 @@ impl Params for DefaultParams {
 
 /// A [`Params`] implementation with compile-time configurable capacity.
 ///
-/// This is the recommended way to create tables with custom capacities.
-/// The capacity `N` is rounded up to the nearest power of two and clamped
-/// to <code>[Capacity::MIN]..=[Capacity::MAX]</code>.
+/// The recommended way to create tables with custom capacities. The capacity
+/// `N` is rounded up to the nearest power of two and clamped to
+/// <code>[Capacity::MIN]..=[Capacity::MAX]</code>.
 ///
 /// # Examples
 ///
 /// ```no_run
 /// use ptab::{PTab, ConstParams};
 ///
-/// // Create a table with 4,096 slots
 /// let table: PTab<String, ConstParams<4096>> = PTab::new();
 /// assert_eq!(table.capacity(), 4096);
 /// ```
@@ -262,7 +239,7 @@ impl Params for DefaultParams {
 ///
 /// # Type Aliases
 ///
-/// For frequently-used configurations, consider defining a type alias:
+/// For frequently-used configurations, define a type alias:
 ///
 /// ```no_run
 /// use ptab::{PTab, ConstParams};
@@ -297,14 +274,13 @@ impl<P> ParamsExt for P where P: Params + ?Sized {}
 
 /// A validated table capacity value.
 ///
-/// `Capacity` represents a power-of-two value in the range <code>[MIN]..=[MAX]</code>.
-/// It is used by [`Params::LENGTH`] to specify how many entries a table can hold.
+/// Represents a power-of-two value in the range <code>[MIN]..=[MAX]</code>.
+/// Used by [`Params::LENGTH`] to specify entry count.
 ///
 /// # Construction
 ///
-/// Use [`Capacity::new`] to create a capacity from an arbitrary value. The
-/// value is automatically rounded up to the nearest power of two and clamped
-/// to the valid range.
+/// Use [`new()`] to create from an arbitrary value; it rounds up to the nearest
+/// power of two and clamps to the valid range.
 ///
 /// ```no_run
 /// use ptab::Capacity;
@@ -328,23 +304,24 @@ impl<P> ParamsExt for P where P: Params + ?Sized {}
 ///
 /// [MIN]: Self::MIN
 /// [MAX]: Self::MAX
+/// [`new()`]: Self::new
 #[derive(Copy, Clone, PartialEq, Eq)]
 #[repr(transparent)]
 pub struct Capacity(CapacityEnum);
 
 impl Capacity {
-  /// The minimum supported capacity: 16 entries.
+  /// The minimum supported capacity (2⁴ entries).
   pub const MIN: Self = Self(CapacityEnum::_Capacity1Shl4);
 
-  /// The maximum supported capacity: 134,217,728 entries (2²⁷).
+  /// The maximum supported capacity (2²⁷ entries).
   pub const MAX: Self = Self(CapacityEnum::_Capacity1Shl27);
 
-  /// The default capacity: 1,048,576 entries (2²⁰).
+  /// The default capacity (2²⁰ entries).
   pub const DEF: Self = Self(CapacityEnum::_Capacity1Shl20);
 
-  /// Creates a new `Capacity` from an arbitrary value.
+  /// Creates a new [`Capacity`] from an arbitrary value.
   ///
-  /// The value is rounded up to the nearest power of two and clamped to
+  /// Rounds up to the nearest power of two and clamps to
   /// <code>[MIN]..=[MAX]</code>.
   ///
   /// # Examples
@@ -375,11 +352,11 @@ impl Capacity {
     }
   }
 
-  /// Creates a new `Capacity` without validation.
+  /// Creates a new [`Capacity`] without validation.
   ///
   /// # Safety
   ///
-  /// `value` must be a power of two in the range <code>[MIN]..=[MAX]</code>.
+  /// `value` must be a power of two in <code>[MIN]..=[MAX]</code>.
   ///
   /// [MIN]: Self::MIN
   /// [MAX]: Self::MAX
@@ -404,8 +381,8 @@ impl Capacity {
 
   /// Returns the base-2 logarithm of the capacity.
   ///
-  /// Since capacity is always a power of two, this is equivalent to
-  /// the bit position of the single set bit.
+  /// Equivalent to the bit position of the single set bit, since capacity is
+  /// always a power of two.
   ///
   /// # Examples
   ///
@@ -413,7 +390,6 @@ impl Capacity {
   /// use ptab::Capacity;
   ///
   /// assert_eq!(Capacity::new(1024).log2(), 10);
-  /// assert_eq!(Capacity::MIN.log2(), 4);
   /// ```
   #[inline]
   pub const fn log2(self) -> u32 {

@@ -1,4 +1,8 @@
-//! Core table implementation with lock-free operations via epoch-based reclamation.
+//! Core table implementation.
+//!
+//! Uses lock-free operations with epoch-based reclamation via [`sdd`].
+//!
+//! [`sdd`]: https://docs.rs/sdd
 
 use core::fmt::Debug;
 use core::fmt::DebugMap;
@@ -31,7 +35,7 @@ use crate::sync::atomic::Ordering::Acquire;
 use crate::sync::atomic::Ordering::Relaxed;
 use crate::sync::atomic::Ordering::Release;
 
-/// Marker value indicating a slot is currently reserved for allocation.
+/// Marker indicating a slot is reserved for an in-progress allocation.
 const RESERVED: usize = usize::MAX;
 
 #[inline]
@@ -45,8 +49,7 @@ where
 
     init(&mut uninit, index);
 
-    // SAFETY: The caller is required to fully initialize the `MaybeUninit<T>`
-    // before returning from the `init` callback.
+    // SAFETY: Caller contract requires `init` to fully initialize `uninit`.
     unsafe { uninit.assume_init() }
   });
 
@@ -55,8 +58,7 @@ where
   debug_assert!(prv.0.is_none(), "AtomicOwned<T> is occupied!");
   debug_assert!(prv.1 == Tag::None, "AtomicOwned<T> is tagged!");
 
-  // SAFETY: The slot is always null before `store`; we manage this invariant
-  // through the `readonly.slot` array.
+  // SAFETY: Slot allocation logic ensures the slot is empty before `store`.
   unsafe {
     hint::assert_unchecked(prv.0.is_none());
     hint::assert_unchecked(prv.1 == Tag::None);
@@ -171,7 +173,7 @@ where
     let guard: Guard = Guard::new();
     let value: Ptr<'_, T> = self.entry(key, &guard);
 
-    // SAFETY: No tag bits are set on these pointers.
+    // SAFETY: Tag bits are never set on data pointers.
     match unsafe { value.as_ref_unchecked() } {
       Some(data) => Some(f(data)),
       None => None,
@@ -262,8 +264,8 @@ where
 
   /// Computes the next abstract index for a slot being released.
   ///
-  /// Advances the generation by adding capacity, ensuring the same concrete
-  /// slot maps to a different abstract index on reuse.
+  /// Adding capacity advances the generation, ensuring the same concrete slot
+  /// produces a different abstract index on reuse (mitigating ABA problems).
   #[inline]
   const fn generate_next_slot(&self, index: Detached) -> usize {
     let mut data: usize = Abstract::<P>::from_detached(index).get();
@@ -297,8 +299,7 @@ where
       let item: AtomicOwned<T> = mem::replace(entry, AtomicOwned::null());
 
       if let Some(value) = item.into_owned(Ordering::Relaxed) {
-        // SAFETY: `Drop` provides exclusive access, so no other thread can be
-        // reading these pointers.
+        // SAFETY: `Drop` provides exclusive access; no concurrent readers.
         unsafe {
           value.drop_in_place();
         }
@@ -337,7 +338,7 @@ where
     for (index, entry) in self.readonly.data.as_slice().iter().enumerate() {
       let value: Ptr<'_, T> = entry.load(Acquire, &guard);
 
-      // SAFETY: No tag bits are set on these pointers.
+      // SAFETY: Tag bits are never set on data pointers.
       if let Some(value) = unsafe { value.as_ref_unchecked() } {
         debug.entry(&index, value);
       }
@@ -351,7 +352,9 @@ where
 // Volatile State
 // -----------------------------------------------------------------------------
 
-/// Mutable table state that changes during operation.
+/// Mutable table state modified during operations.
+///
+/// Isolated from [`ReadOnly`] via cache padding to avoid false sharing.
 #[repr(C)]
 struct Volatile<P>
 where
@@ -359,9 +362,9 @@ where
 {
   /// Current number of allocated entries.
   entries: AtomicU32,
-  /// Counter for the next slot to allocate.
+  /// Counter for the next slot to try during allocation.
   next_id: AtomicU32,
-  /// Counter for the next slot to release.
+  /// Counter for the next slot to try during deallocation.
   free_id: AtomicU32,
   phantom: PhantomData<fn(P)>,
 }
@@ -372,8 +375,8 @@ where
 {
   #[inline]
   fn new() -> Self {
-    // When configured for `Capacity::MAX`, one slot is permanently reserved
-    // because the table cannot yield that many unique identifiers.
+    // At `Capacity::MAX`, one slot is permanently reserved because the table
+    // cannot yield that many unique identifiers.
     Self {
       entries: AtomicU32::new(u32::from(P::LENGTH == Capacity::MAX)),
       next_id: AtomicU32::new(0),
@@ -398,6 +401,9 @@ where
 // -----------------------------------------------------------------------------
 
 /// Immutable table state initialized once at construction.
+///
+/// Individual slots are modified atomically, but the arrays themselves never
+/// resize. Isolated from [`Volatile`] via cache padding.
 #[repr(C)]
 struct ReadOnly<T, P>
 where
@@ -424,7 +430,7 @@ where
   #[cfg(not(loom))]
   #[inline]
   fn new_data_array() -> Array<AtomicOwned<T>, P> {
-    // SAFETY: An all-zeros bit pattern is a valid null `AtomicOwned<T>`.
+    // SAFETY: All-zeros is a valid null `AtomicOwned<T>`.
     unsafe { Array::new_zeroed().assume_init() }
   }
 
@@ -453,7 +459,9 @@ where
 // Permit
 // -----------------------------------------------------------------------------
 
-/// A proof token that a slot has been reserved for allocation.
+/// Proof token that capacity has been reserved for an allocation.
+///
+/// Consumed by [`Table::acquire_slot`] to complete the allocation.
 struct Permit<'table, T, P>
 where
   P: Params + ?Sized,

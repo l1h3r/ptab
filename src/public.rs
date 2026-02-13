@@ -22,8 +22,7 @@ use crate::table::Table;
 /// # Type Parameters
 ///
 /// - `T`: The type of values stored in the table.
-/// - `P`: Configuration parameters implementing [`Params`]. Defaults to
-///   [`DefaultParams`] (1,048,576 slots).
+/// - `P`: Configuration implementing [`Params`]. Defaults to [`DefaultParams`].
 ///
 /// # Examples
 ///
@@ -47,7 +46,7 @@ use crate::table::Table;
 /// assert_eq!(table.capacity(), 256);
 /// ```
 ///
-/// [`ConstParams`]: crate::ConstParams
+/// [`ConstParams`]: crate::params::ConstParams
 #[repr(transparent)]
 pub struct PTab<T, P = DefaultParams>
 where
@@ -79,8 +78,7 @@ where
 
   /// Returns the maximum number of entries the table can hold.
   ///
-  /// This value is determined by the [`Params::LENGTH`] configuration and
-  /// is fixed for the lifetime of the table.
+  /// Determined by [`Params::LENGTH`] and fixed for the lifetime of the table.
   ///
   /// # Examples
   ///
@@ -97,8 +95,7 @@ where
 
   /// Returns the number of entries currently in the table.
   ///
-  /// This value may change immediately after reading due to concurrent
-  /// operations in other threads.
+  /// May change immediately due to concurrent operations.
   ///
   /// # Examples
   ///
@@ -137,7 +134,8 @@ where
 
   /// Inserts a value into the table and returns its index.
   ///
-  /// Returns `None` if the table is at capacity.
+  /// Returns [`None`] if the table is at capacity. Use [`write`] instead when
+  /// the stored value needs to know its own index.
   ///
   /// # Examples
   ///
@@ -149,6 +147,8 @@ where
   /// let idx = table.insert("hello").unwrap();
   /// assert!(table.exists(idx));
   /// ```
+  ///
+  /// [`write`]: Self::write
   #[inline]
   pub fn insert(&self, value: T) -> Option<Detached>
   where
@@ -157,19 +157,17 @@ where
     self.inner.insert(value)
   }
 
-  /// Inserts a value into the table using an initialization function.
+  /// Inserts a value using an initialization function that receives the index.
   ///
-  /// The `init` function receives an uninitialized slot and the index that
-  /// will identify the entry. This allows the stored value to contain its
-  /// own index, which is useful for self-referential data structures.
-  ///
-  /// Returns `None` if the table is at capacity.
+  /// Enables self-referential structures where the stored value contains its
+  /// own index. Returns [`None`] if the table is at capacity.
   ///
   /// # Requirements
   ///
   /// The `init` function:
+  ///
   /// - **Must** fully initialize the [`MaybeUninit<T>`] before returning
-  /// - **Must not** panic (panics will permanently leak a slot)
+  /// - **Must not** panic (panics permanently leak a slot)
   /// - **Should** avoid recursive table operations
   ///
   /// # Examples
@@ -191,6 +189,8 @@ where
   /// // The stored process knows its own index
   /// table.with(idx, |proc| assert_eq!(proc.id, idx));
   /// ```
+  ///
+  /// [`MaybeUninit<T>`]: core::mem::MaybeUninit
   #[inline]
   pub fn write<F>(&self, init: F) -> Option<Detached>
   where
@@ -202,10 +202,9 @@ where
 
   /// Removes the entry at the given index.
   ///
-  /// Returns `true` if an entry was present and removed, `false` otherwise.
-  ///
-  /// The slot becomes available for reuse after removal. Memory is reclaimed
-  /// once all concurrent readers have finished accessing the entry.
+  /// Returns `true` if an entry was removed, `false` if already absent. The
+  /// slot becomes available for reuse immediately; memory is reclaimed via
+  /// epoch-based reclamation once no readers hold references.
   ///
   /// # Examples
   ///
@@ -225,7 +224,7 @@ where
 
   /// Returns `true` if an entry exists at the given index.
   ///
-  /// The result may become stale immediately due to concurrent operations.
+  /// May become stale immediately due to concurrent operations.
   ///
   /// # Examples
   ///
@@ -246,10 +245,9 @@ where
 
   /// Accesses an entry by index, applying a function to it.
   ///
-  /// Returns `None` if no entry exists at the given index.
-  ///
-  /// The callback receives a reference that is guaranteed to remain valid
-  /// for its duration, even if another thread removes the entry concurrently.
+  /// Returns [`None`] if no entry exists. The reference remains valid for the
+  /// callback's duration even under concurrent removal, due to epoch-based
+  /// reclamation.
   ///
   /// # Examples
   ///
@@ -272,9 +270,8 @@ where
 
   /// Returns a copy of the entry at the given index.
   ///
-  /// This is a convenience method equivalent to `table.with(idx, |v| *v)`.
-  ///
-  /// Returns `None` if no entry exists at the given index.
+  /// Convenience method equivalent to `self.with(idx, |v| *v)`. Returns
+  /// [`None`] if no entry exists.
   ///
   /// # Examples
   ///
@@ -318,8 +315,8 @@ where
   }
 }
 
-// SAFETY: All internal state uses atomic operations and epoch-based
-// reclamation, so `PTab` is `Send` when `T` is `Send`.
+// SAFETY: Internal state uses atomics and epoch-based reclamation; sharing
+// across threads is safe when `T` can be sent between threads.
 unsafe impl<T, P> Send for PTab<T, P>
 where
   T: Send,
@@ -327,9 +324,8 @@ where
 {
 }
 
-// SAFETY: Concurrent access is mediated through atomic operations. `T: Sync`
-// is not required because `with` borrows the table, preventing simultaneous
-// mutable access to the same entry.
+// SAFETY: Concurrent access is mediated through atomics. `T: Sync` is not
+// required because `with` only provides shared references.
 unsafe impl<T, P> Sync for PTab<T, P>
 where
   T: Send,
@@ -337,9 +333,7 @@ where
 {
 }
 
-// These impls are intentionally unconditional on `T` because:
-// 1. PTab only provides shared access to T (via `with`)
-// 2. Panic unwind cannot observe partially-modified T values
-// 3. The epoch-based reclamation is unwind-safe
+// Unconditional because `PTab` provides only shared access to `T` via `with`,
+// and epoch-based reclamation handles panic unwind safely.
 impl<T, P> RefUnwindSafe for PTab<T, P> where P: Params + ?Sized {}
 impl<T, P> UnwindSafe for PTab<T, P> where P: Params + ?Sized {}
