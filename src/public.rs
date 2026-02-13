@@ -10,6 +10,7 @@ use crate::params::DefaultParams;
 use crate::params::Params;
 use crate::params::ParamsExt;
 use crate::table::Table;
+use crate::table::WeakKeys;
 
 /// A lock-free concurrent table.
 ///
@@ -289,6 +290,38 @@ where
     T: Copy,
   {
     self.inner.read(index)
+  }
+
+  /// Returns a weakly consistent iterator over all currently allocated indices.
+  ///
+  /// # Semantics
+  ///
+  /// This iterator provides **weak snapshot semantics**:
+  ///
+  /// - Entries inserted after iteration begins **may or may not** be observed.
+  /// - Entries removed during iteration **may or may not** be observed.
+  /// - Each yielded index was valid at some instant during iteration.
+  ///
+  /// # Examples
+  ///
+  /// ```no_run
+  /// use ptab::PTab;
+  ///
+  /// let table: PTab<i32> = PTab::new();
+  /// let a = table.insert(1).unwrap();
+  /// let b = table.insert(2).unwrap();
+  ///
+  /// let mut seen = Vec::new();
+  /// for key in table.weak_keys() {
+  ///   seen.push(key);
+  /// }
+  ///
+  /// assert!(seen.contains(&a));
+  /// assert!(seen.contains(&b));
+  /// ```
+  #[inline]
+  pub fn weak_keys(&self) -> WeakKeys<'_, T, P> {
+    self.inner.weak_keys()
   }
 }
 
