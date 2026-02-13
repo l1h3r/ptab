@@ -344,7 +344,10 @@ fn test_min_capacity_operations() {
   assert!(!table.exists(index));
 }
 
-#[cfg_attr(not(feature = "slow"), ignore = "enable the 'slow' feature to run this test.")]
+#[cfg_attr(
+  not(feature = "slow"),
+  ignore = "enable the 'slow' feature to run this test."
+)]
 #[test]
 fn test_max_capacity_operations() {
   type Params = ConstParams<{ Capacity::MAX.as_usize() }>;

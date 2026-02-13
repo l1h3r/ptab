@@ -37,8 +37,8 @@ mod model {
 }
 
 use self::model::Arc;
-use self::model::thread;
 use self::model::JoinHandle;
+use self::model::thread;
 
 use std::ops::Deref;
 
