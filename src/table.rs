@@ -82,7 +82,6 @@ impl<T, P> Table<T, P>
 where
   P: Params + ?Sized,
 {
-  #[track_caller]
   #[inline]
   pub(crate) fn new() -> Self {
     Self {
@@ -91,25 +90,21 @@ where
     }
   }
 
-  #[track_caller]
   #[inline]
   pub(crate) const fn cap(&self) -> usize {
     P::LENGTH.as_usize()
   }
 
-  #[track_caller]
   #[inline]
   pub(crate) fn len(&self) -> u32 {
     self.volatile.entries.load(Relaxed)
   }
 
-  #[track_caller]
   #[inline]
   pub(crate) fn is_empty(&self) -> bool {
     self.len() == 0
   }
 
-  #[track_caller]
   #[inline]
   pub(crate) fn insert(&self, value: T) -> Option<Detached>
   where
@@ -120,7 +115,6 @@ where
     })
   }
 
-  #[track_caller]
   #[inline]
   pub(crate) fn write<F>(&self, init: F) -> Option<Detached>
   where
@@ -137,7 +131,6 @@ where
     Some(detached_idx)
   }
 
-  #[track_caller]
   #[inline]
   pub(crate) fn remove(&self, key: Detached) -> bool {
     let index: Concrete<P> = Concrete::from_detached(key);
@@ -155,7 +148,6 @@ where
     true
   }
 
-  #[track_caller]
   #[inline]
   pub(crate) fn exists(&self, key: Detached) -> bool {
     let guard: Guard = Guard::new();
@@ -164,7 +156,6 @@ where
     !value.is_null()
   }
 
-  #[track_caller]
   #[inline]
   pub(crate) fn with<F, R>(&self, key: Detached, f: F) -> Option<R>
   where
@@ -180,7 +171,6 @@ where
     }
   }
 
-  #[track_caller]
   #[inline]
   pub(crate) fn read(&self, key: Detached) -> Option<T>
   where
