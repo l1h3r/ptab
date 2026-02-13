@@ -548,10 +548,12 @@ where
       index += 1;
 
       let ptr: Ptr<'_, T> = {
+        // SAFETY: `Concrete<P>` indices are always less than `P::LENGTH`.
         let raw: NonNull<AtomicOwned<T>> = unsafe {
           self.array.add(concrete_idx.get())
         };
 
+        // SAFETY: Pointer is valid and aligned.
         let data: &AtomicOwned<T> = unsafe {
           raw.as_ref()
         };
