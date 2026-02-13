@@ -86,6 +86,12 @@ where
     }
   }
 
+  /// Returns a non-null pointer to the array.
+  #[inline]
+  pub(crate) const fn as_nonnull(&self) -> NonNull<T> {
+    self.nonnull
+  }
+
   /// Returns a raw pointer to the array.
   #[inline]
   pub(crate) const fn as_ptr(&self) -> *const T {

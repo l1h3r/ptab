@@ -12,6 +12,7 @@ use core::hint;
 use core::marker::PhantomData;
 use core::mem;
 use core::mem::MaybeUninit;
+use core::ptr::NonNull;
 
 use sdd::AtomicOwned;
 use sdd::Guard;
@@ -499,9 +500,10 @@ pub struct WeakKeys<'table, T, P>
 where
   P: Params + ?Sized,
 {
-  table: &'table Table<T, P>,
+  array: NonNull<AtomicOwned<T>>,
   guard: Guard,
   index: usize,
+  table: PhantomData<&'table ReadOnly<T, P>>,
 }
 
 impl<'table, T, P> WeakKeys<'table, T, P>
@@ -511,9 +513,10 @@ where
   #[inline]
   pub(crate) fn new(table: &'table Table<T, P>) -> Self {
     Self {
-      table,
+      array: table.readonly.data.as_nonnull(),
       guard: Guard::new(),
       index: 0,
+      table: PhantomData,
     }
   }
 }
@@ -535,26 +538,38 @@ where
 
   #[inline]
   fn next(&mut self) -> Option<Self::Item> {
-    let cap: usize = self.table.cap();
+    let capapcity: usize = P::LENGTH.as_usize();
+    let mut index: usize = self.index;
 
-    while self.index < cap {
-      let abstract_idx: Abstract<P> = Abstract::new(self.index);
+    while index < capapcity {
+      let abstract_idx: Abstract<P> = Abstract::new(index);
       let concrete_idx: Concrete<P> = Concrete::from_abstract(abstract_idx);
 
-      self.index += 1;
+      index += 1;
 
-      let entry: Ptr<'_, T> = self.table.entry(concrete_idx, &self.guard);
+      let ptr: Ptr<'_, T> = {
+        let raw: NonNull<AtomicOwned<T>> = unsafe {
+          self.array.add(concrete_idx.get())
+        };
 
-      if !entry.is_null() {
-        return Some(Detached::from_abstract(abstract_idx));
+        let data: &AtomicOwned<T> = unsafe {
+          raw.as_ref()
+        };
+
+        data.load(Acquire, &self.guard)
+      };
+
+      if ptr.is_null() {
+        continue;
       }
+
+      self.index = index;
+
+      return Some(Detached::from_abstract(abstract_idx));
     }
 
-    None
-  }
+    self.index = index;
 
-  #[inline]
-  fn size_hint(&self) -> (usize, Option<usize>) {
-    (0, Some(self.table.len() as usize))
+    None
   }
 }
