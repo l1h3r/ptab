@@ -2,7 +2,6 @@ use crate::params;
 use crate::params::CACHE_LINE;
 use crate::params::CACHE_LINE_SLOTS;
 use crate::params::Capacity;
-use crate::params::DefaultParams;
 use crate::params::Params;
 use crate::params::ParamsExt;
 
