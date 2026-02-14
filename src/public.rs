@@ -5,6 +5,8 @@ use core::mem::MaybeUninit;
 use core::panic::RefUnwindSafe;
 use core::panic::UnwindSafe;
 
+use sdd::Guard;
+
 use crate::index::Detached;
 use crate::params::DefaultParams;
 use crate::params::Params;
@@ -241,7 +243,7 @@ where
   /// ```
   #[inline]
   pub fn exists(&self, index: Detached) -> bool {
-    self.inner.exists(index)
+    self.inner.exists(index, &Guard::new())
   }
 
   /// Accesses an entry by index, applying a function to it.
@@ -266,7 +268,7 @@ where
   where
     F: Fn(&T) -> R,
   {
-    self.inner.with(index, f)
+    self.inner.with(index, &Guard::new(), f)
   }
 
   /// Returns a copy of the entry at the given index.
@@ -289,7 +291,7 @@ where
   where
     T: Copy,
   {
-    self.inner.read(index)
+    self.inner.read(index, &Guard::new())
   }
 
   /// Returns a weakly consistent iterator over all currently allocated indices.

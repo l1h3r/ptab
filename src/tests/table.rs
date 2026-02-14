@@ -2,6 +2,8 @@ use std::collections::HashSet;
 use std::sync::atomic::AtomicU32;
 use std::sync::atomic::Ordering;
 
+use sdd::Guard;
+
 use crate::index::Detached;
 use crate::params::Capacity;
 use crate::params::ConstParams;
@@ -22,17 +24,19 @@ fn test_new() {
 #[test]
 fn test_insert_single() {
   let table: Table<usize, TestParams> = Table::new();
+  let guard: Guard = Guard::new();
   let index: Detached = table.insert(123).unwrap();
 
   assert_eq!(table.len(), 1);
   assert!(!table.is_empty());
-  assert!(table.exists(index));
-  assert_eq!(table.read(index), Some(123));
+  assert!(table.exists(index, &guard));
+  assert_eq!(table.read(index, &guard), Some(123));
 }
 
 #[test]
 fn test_insert_multiple() {
   let table: Table<usize, TestParams> = Table::new();
+  let guard: Guard = Guard::new();
   let mut keys: Vec<Detached> = Vec::with_capacity(32);
 
   for index in 0..32 {
@@ -42,7 +46,7 @@ fn test_insert_multiple() {
   assert_eq!(table.len(), 32);
 
   for (index, key) in keys.iter().enumerate() {
-    assert_eq!(table.read(*key), Some(index * 100));
+    assert_eq!(table.read(*key, &guard), Some(index * 100));
   }
 }
 
@@ -71,6 +75,7 @@ fn test_insert_maximum() {
 #[test]
 fn test_write_callback_receives_correct_index() {
   let table: Table<usize, TestParams> = Table::new();
+  let guard: Guard = Guard::new();
 
   let index: Detached = table
     .write(|uninit, index| {
@@ -78,22 +83,23 @@ fn test_write_callback_receives_correct_index() {
     })
     .unwrap();
 
-  assert_eq!(table.read(index), Some(index.into_bits()));
+  assert_eq!(table.read(index, &guard), Some(index.into_bits()));
 }
 
 #[test]
 fn test_remove_existing() {
   let table: Table<usize, TestParams> = Table::new();
+  let guard: Guard = Guard::new();
   let index: Detached = table.insert(123).unwrap();
 
   assert_eq!(table.len(), 1);
   assert!(!table.is_empty());
-  assert!(table.exists(index));
+  assert!(table.exists(index, &guard));
   assert!(table.remove(index));
 
   assert_eq!(table.len(), 0);
   assert!(table.is_empty());
-  assert!(!table.exists(index));
+  assert!(!table.exists(index, &guard));
 }
 
 #[test]
@@ -108,6 +114,7 @@ fn test_remove_nonexistent() {
 #[test]
 fn test_remove_isolation() {
   let table: Table<usize, TestParams> = Table::new();
+  let guard: Guard = Guard::new();
   let mut keys: Vec<Detached> = Vec::with_capacity(16);
 
   for index in 0..16 {
@@ -121,17 +128,18 @@ fn test_remove_isolation() {
   assert_eq!(table.len(), 8);
 
   for index in (1..16).step_by(2) {
-    assert_eq!(table.read(keys[index]), Some(index));
+    assert_eq!(table.read(keys[index], &guard), Some(index));
   }
 
   for index in (0..16).step_by(2) {
-    assert!(!table.exists(keys[index]));
+    assert!(!table.exists(keys[index], &guard));
   }
 }
 
 #[test]
 fn test_remove_recycling() {
   let table: Table<usize, TestParams> = Table::new();
+  let guard: Guard = Guard::new();
   let mut keys: Vec<Detached> = Vec::with_capacity(table.cap() - 1);
 
   for index in 0..table.cap() {
@@ -144,78 +152,85 @@ fn test_remove_recycling() {
 
   let index: Detached = table.insert(100).unwrap();
 
-  assert!(table.exists(index));
-  assert_eq!(table.read(index), Some(100));
+  assert!(table.exists(index, &guard));
+  assert_eq!(table.read(index, &guard), Some(100));
 }
 
 #[test]
 fn test_exists_existing() {
   let table: Table<usize, TestParams> = Table::new();
+  let guard: Guard = Guard::new();
   let index: Detached = table.insert(123).unwrap();
 
-  assert!(table.exists(index));
+  assert!(table.exists(index, &guard));
 }
 
 #[test]
 fn test_exists_nonexistent() {
   let table: Table<usize, TestParams> = Table::new();
+  let guard: Guard = Guard::new();
   let index: Detached = table.insert(123).unwrap();
 
   assert!(table.remove(index));
-  assert!(!table.exists(index));
+  assert!(!table.exists(index, &guard));
 }
 
 #[test]
 fn test_exists_multiple() {
   let table: Table<usize, TestParams> = Table::new();
+  let guard: Guard = Guard::new();
 
   let index1: Detached = table.insert(1).unwrap();
   let index2: Detached = table.insert(2).unwrap();
   let index3: Detached = table.insert(3).unwrap();
 
-  assert!(table.exists(index1));
-  assert!(table.exists(index2));
-  assert!(table.exists(index3));
+  assert!(table.exists(index1, &guard));
+  assert!(table.exists(index2, &guard));
+  assert!(table.exists(index3, &guard));
 
   table.remove(index2);
 
-  assert!(table.exists(index1));
-  assert!(!table.exists(index2));
-  assert!(table.exists(index3));
+  assert!(table.exists(index1, &guard));
+  assert!(!table.exists(index2, &guard));
+  assert!(table.exists(index3, &guard));
 }
 
 #[test]
 fn test_with_value() {
   let table: Table<usize, TestParams> = Table::new();
+  let guard: Guard = Guard::new();
   let index: Detached = table.insert(12345).unwrap();
 
-  assert_eq!(table.with(index, |data| *data), Some(12345));
+  assert_eq!(table.with(index, &guard, |data| *data), Some(12345));
 }
 
 #[test]
 fn test_with_return_value() {
   let table: Table<usize, TestParams> = Table::new();
+  let guard: Guard = Guard::new();
   let index: Detached = table.insert(123).unwrap();
 
-  assert_eq!(table.with(index, |data| data + 1), Some(124));
+  assert_eq!(table.with(index, &guard, |data| data + 1), Some(124));
 }
 
 #[test]
 fn test_with_nonexistent() {
   let table: Table<usize, TestParams> = Table::new();
+  let guard: Guard = Guard::new();
   let index: Detached = table.insert(123).unwrap();
 
   assert!(table.remove(index));
-  assert_eq!(table.with(index, |data| *data), None);
+  assert_eq!(table.with(index, &guard, |data| *data), None);
 }
 
 #[test]
 fn test_with_multiple() {
   let table: Table<usize, TestParams> = Table::new();
+  let guard: Guard = Guard::new();
   let index: Detached = table.insert(123).unwrap();
 
   for _ in 0..100 {
-    assert_eq!(table.with(index, |data| *data), Some(123));
+    assert_eq!(table.with(index, &guard, |data| *data), Some(123));
   }
 }
 
@@ -260,6 +275,7 @@ fn test_is_empty() {
 #[test]
 fn test_interleaved_insert_remove() {
   let table: Table<usize, TestParams> = Table::new();
+  let guard: Guard = Guard::new();
   let mut keys: Vec<Detached> = Vec::with_capacity(16);
 
   for index in 0..8 {
@@ -278,13 +294,14 @@ fn test_interleaved_insert_remove() {
   assert_eq!(table.len(), 12);
 
   for key in keys {
-    assert!(table.exists(key));
+    assert!(table.exists(key, &guard));
   }
 }
 
 #[test]
 fn test_multiple_refills() {
   let table: Table<usize, TestParams> = Table::new();
+  let guard: Guard = Guard::new();
 
   for round in 0..3 {
     let mut keys: Vec<Detached> = Vec::new();
@@ -295,7 +312,7 @@ fn test_multiple_refills() {
     assert_eq!(table.len(), 16);
 
     for (index, key) in keys.iter().enumerate() {
-      assert_eq!(table.read(*key), Some(round * 100 + index));
+      assert_eq!(table.read(*key, &guard), Some(round * 100 + index));
     }
 
     for key in keys {
@@ -324,7 +341,7 @@ fn test_uniqueness_across_multiple_generations() {
     }
 
     for key in key_arr {
-      table.remove(key);
+      assert!(table.remove(key));
     }
   }
 }
@@ -334,14 +351,16 @@ fn test_min_capacity_operations() {
   type Params = ConstParams<{ Capacity::MIN.as_usize() }>;
 
   let table: Table<usize, Params> = Table::new();
+  let guard: Guard = Guard::new();
+
   assert_eq!(table.cap(), Capacity::MIN.as_usize());
 
   let index: Detached = table.insert(99).unwrap();
 
-  assert!(table.exists(index));
-  assert_eq!(table.read(index), Some(99));
+  assert!(table.exists(index, &guard));
+  assert_eq!(table.read(index, &guard), Some(99));
   assert!(table.remove(index));
-  assert!(!table.exists(index));
+  assert!(!table.exists(index, &guard));
 }
 
 #[cfg_attr(

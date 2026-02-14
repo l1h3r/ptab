@@ -150,22 +150,11 @@ where
   }
 
   #[inline]
-  pub(crate) fn exists(&self, key: Detached) -> bool {
-    let guard: Guard = Guard::new();
-    let index: Concrete<P> = Concrete::from_detached(key);
-    let value: Ptr<'_, T> = self.entry(index, &guard);
-
-    !value.is_null()
-  }
-
-  #[inline]
-  pub(crate) fn with<F, R>(&self, key: Detached, f: F) -> Option<R>
+  pub(crate) fn with<F, R>(&self, key: Detached, guard: &Guard, f: F) -> Option<R>
   where
     F: Fn(&T) -> R,
   {
-    let guard: Guard = Guard::new();
-    let index: Concrete<P> = Concrete::from_detached(key);
-    let value: Ptr<'_, T> = self.entry(index, &guard);
+    let value: Ptr<'_, T> = self.find(key, guard);
 
     // SAFETY: Tag bits are never set on data pointers.
     match unsafe { value.as_ref_unchecked() } {
@@ -175,19 +164,16 @@ where
   }
 
   #[inline]
-  pub(crate) fn read(&self, key: Detached) -> Option<T>
+  pub(crate) fn exists(&self, key: Detached, guard: &Guard) -> bool {
+    !self.find(key, guard).is_null()
+  }
+
+  #[inline]
+  pub(crate) fn read(&self, key: Detached, guard: &Guard) -> Option<T>
   where
     T: Copy,
   {
-    let guard: Guard = Guard::new();
-    let index: Concrete<P> = Concrete::from_detached(key);
-    let value: Ptr<'_, T> = self.entry(index, &guard);
-
-    // SAFETY: No tag bits are set on these pointers.
-    match unsafe { value.as_ref_unchecked() } {
-      Some(data) => Some(*data),
-      None => None,
-    }
+    self.with(key, guard, |data| *data)
   }
 
   #[inline]
@@ -196,7 +182,12 @@ where
   }
 
   #[inline]
-  fn entry<'guard>(&self, index: Concrete<P>, guard: &'guard Guard) -> Ptr<'guard, T> {
+  fn find<'guard>(&self, key: Detached, guard: &'guard Guard) -> Ptr<'guard, T> {
+    self.load(Concrete::from_detached(key), guard)
+  }
+
+  #[inline]
+  fn load<'guard>(&self, index: Concrete<P>, guard: &'guard Guard) -> Ptr<'guard, T> {
     self.readonly.data.get(index).load(Acquire, guard)
   }
 
