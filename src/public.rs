@@ -31,7 +31,7 @@ use crate::table::WeakKeys;
 ///
 /// Basic usage with default configuration:
 ///
-/// ```no_run
+/// ```
 /// use ptab::PTab;
 ///
 /// let table: PTab<i32> = PTab::new();
@@ -42,7 +42,7 @@ use crate::table::WeakKeys;
 ///
 /// Custom capacity using [`ConstParams`]:
 ///
-/// ```no_run
+/// ```
 /// use ptab::{PTab, ConstParams};
 ///
 /// let table: PTab<i32, ConstParams<256>> = PTab::new();
@@ -66,7 +66,7 @@ where
   ///
   /// # Examples
   ///
-  /// ```no_run
+  /// ```
   /// use ptab::PTab;
   ///
   /// let table: PTab<String> = PTab::new();
@@ -85,7 +85,7 @@ where
   ///
   /// # Examples
   ///
-  /// ```no_run
+  /// ```
   /// use ptab::{PTab, ConstParams};
   ///
   /// let table: PTab<u64, ConstParams<512>> = PTab::new();
@@ -102,7 +102,7 @@ where
   ///
   /// # Examples
   ///
-  /// ```no_run
+  /// ```
   /// use ptab::PTab;
   ///
   /// let table: PTab<i32> = PTab::new();
@@ -121,7 +121,7 @@ where
   ///
   /// # Examples
   ///
-  /// ```no_run
+  /// ```
   /// use ptab::PTab;
   ///
   /// let table: PTab<i32> = PTab::new();
@@ -142,7 +142,7 @@ where
   ///
   /// # Examples
   ///
-  /// ```no_run
+  /// ```
   /// use ptab::PTab;
   ///
   /// let table: PTab<&str> = PTab::new();
@@ -175,7 +175,7 @@ where
   ///
   /// # Examples
   ///
-  /// ```no_run
+  /// ```
   /// use ptab::{PTab, Detached};
   ///
   /// struct Process {
@@ -211,7 +211,7 @@ where
   ///
   /// # Examples
   ///
-  /// ```no_run
+  /// ```
   /// use ptab::PTab;
   ///
   /// let table: PTab<i32> = PTab::new();
@@ -231,7 +231,7 @@ where
   ///
   /// # Examples
   ///
-  /// ```no_run
+  /// ```
   /// use ptab::PTab;
   ///
   /// let table: PTab<i32> = PTab::new();
@@ -254,7 +254,7 @@ where
   ///
   /// # Examples
   ///
-  /// ```no_run
+  /// ```
   /// use ptab::PTab;
   ///
   /// let table: PTab<String> = PTab::new();
@@ -278,7 +278,7 @@ where
   ///
   /// # Examples
   ///
-  /// ```no_run
+  /// ```
   /// use ptab::PTab;
   ///
   /// let table: PTab<i32> = PTab::new();
@@ -306,7 +306,7 @@ where
   ///
   /// # Examples
   ///
-  /// ```no_run
+  /// ```
   /// use ptab::PTab;
   ///
   /// let table: PTab<i32> = PTab::new();

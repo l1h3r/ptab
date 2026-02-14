@@ -2,10 +2,6 @@
 //!
 //! Provides [`CachePadded`], a wrapper that aligns its contents to a cache line.
 
-use core::fmt::Debug;
-use core::fmt::Display;
-use core::fmt::Formatter;
-use core::fmt::Result;
 use core::ops::Deref;
 use core::ops::DerefMut;
 
@@ -88,23 +84,5 @@ impl<T> DerefMut for CachePadded<T> {
   #[inline]
   fn deref_mut(&mut self) -> &mut T {
     &mut self.value
-  }
-}
-
-impl<T> Debug for CachePadded<T>
-where
-  T: Debug,
-{
-  fn fmt(&self, f: &mut Formatter<'_>) -> Result {
-    Debug::fmt(&self.value, f)
-  }
-}
-
-impl<T> Display for CachePadded<T>
-where
-  T: Display,
-{
-  fn fmt(&self, f: &mut Formatter<'_>) -> Result {
-    Display::fmt(&self.value, f)
   }
 }

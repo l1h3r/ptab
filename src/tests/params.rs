@@ -1,47 +1,69 @@
+use crate::params;
 use crate::params::CACHE_LINE;
 use crate::params::CACHE_LINE_SLOTS;
 use crate::params::Capacity;
+use crate::params::DefaultParams;
 use crate::params::Params;
 use crate::params::ParamsExt;
 
 #[test]
-fn test_capacity_min() {
-  assert_eq!(
-    Capacity::new(1).as_usize(),
-    Capacity::MIN.as_usize(),
-    "invalid capacity: expected clamp to MIN",
-  );
+fn capacity_min() {
+  assert_eq!(Capacity::new(1).as_usize(), Capacity::MIN.as_usize());
 }
 
 #[test]
-fn test_capacity_max() {
-  assert_eq!(
-    Capacity::new(1 << 30).as_usize(),
-    Capacity::MAX.as_usize(),
-    "invalid capacity: expected clamp to MAX",
-  );
+fn capacity_max() {
+  const MAX: usize = Capacity::MAX.as_usize();
+
+  assert_eq!(Capacity::new(MAX + 1).as_usize(), MAX);
+  assert_eq!(Capacity::new(usize::MAX).as_usize(), MAX);
 }
 
 #[test]
-fn test_capacity_round_up() {
-  assert_eq!(
-    Capacity::new((1 << 7) - 25).as_usize(),
-    1 << 7,
-    "invalid capacity: expected round up",
-  );
+fn capacity_round_up() {
+  assert_eq!(Capacity::new((1 << 7) - 25).as_usize(), 1 << 7);
 }
 
 #[test]
-fn test_capacity_exact() {
-  assert_eq!(
-    Capacity::new(1 << 8).as_usize(),
-    1 << 8,
-    "invalid capacity: expected no change",
-  );
+fn capacity_exact() {
+  assert_eq!(Capacity::new(1 << 8).as_usize(), 1 << 8);
 }
 
 #[test]
-fn test_blocks() {
+fn capacity_default() {
+  assert_eq!(Capacity::DEF, Default::default());
+}
+
+#[test]
+fn capacity_as_nonzero() {
+  each_capacity!({
+    assert_eq!(P::LENGTH.as_nonzero().get(), P::LENGTH.as_usize());
+  });
+}
+
+#[test]
+fn capacity_log2() {
+  each_capacity!({
+    assert_eq!(P::LENGTH.log2(), P::LENGTH.as_usize().ilog2());
+  });
+}
+
+#[test]
+fn capacity_into_nonzero() {
+  each_capacity!({
+    assert_eq!(P::LENGTH.as_nonzero(), P::LENGTH.into());
+  });
+}
+
+#[test]
+fn capacity_into_usize() {
+  each_capacity!({
+    assert_eq!(P::LENGTH.as_usize(), P::LENGTH.into());
+  });
+}
+
+#[test]
+fn blocks() {
   each_capacity!({
     let expected: usize = P::LENGTH.as_usize() * size_of::<usize>();
     let received: usize = P::BLOCKS.get() * CACHE_LINE;
@@ -55,7 +77,7 @@ fn test_blocks() {
 }
 
 #[test]
-fn test_blocks_vs_length() {
+fn blocks_vs_length() {
   each_capacity!({
     let expected: usize = P::BLOCKS.get() * CACHE_LINE_SLOTS;
     let received: usize = P::LENGTH.as_usize();
@@ -70,7 +92,7 @@ fn test_blocks_vs_length() {
 }
 
 #[test]
-fn test_masks_and_shifts() {
+fn masks_and_shifts() {
   each_capacity!({
     assert!(
       P::LENGTH.as_usize().is_power_of_two(),
@@ -115,7 +137,7 @@ fn test_masks_and_shifts() {
 }
 
 #[test]
-fn test_entry_mask_covers_all_indices() {
+fn entry_mask_covers_all_indices() {
   each_capacity!({
     for index in 0..P::LENGTH.as_usize() {
       assert!(
@@ -126,4 +148,18 @@ fn test_entry_mask_covers_all_indices() {
       );
     }
   });
+}
+
+#[test]
+fn derive_blocks() {
+  each_capacity!({
+    assert_eq!(P::BLOCKS, params::derive_blocks::<P>());
+  })
+}
+
+#[test]
+fn derive_layout() {
+  each_capacity!({
+    assert_eq!(P::LAYOUT, params::derive_layout::<P>());
+  })
 }

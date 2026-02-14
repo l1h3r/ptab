@@ -25,6 +25,7 @@ use crate::index::Abstract;
 use crate::index::Concrete;
 use crate::index::Detached;
 use crate::padded::CachePadded;
+use crate::params::CACHE_LINE_SLOTS;
 use crate::params::Capacity;
 use crate::params::Params;
 use crate::params::ParamsExt;
@@ -432,8 +433,8 @@ where
   fn new_slot_array() -> Array<AtomicUsize, P> {
     Array::new(|offset, item| {
       // Initialize slots with abstract indices distributed across cache lines.
-      let block: usize = offset % P::BLOCKS.get();
-      let index: usize = offset / P::BLOCKS.get();
+      let block: usize = offset / CACHE_LINE_SLOTS;
+      let index: usize = offset % CACHE_LINE_SLOTS;
       let value: usize = index * P::BLOCKS.get() + block;
 
       item.write(AtomicUsize::new(value));
