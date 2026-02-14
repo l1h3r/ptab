@@ -41,10 +41,10 @@ where
 
     while index < P::LENGTH.as_usize() {
       // SAFETY: `index < P::LENGTH` and allocation holds `P::LENGTH` elements.
-      let ptr: NonNull<MaybeUninit<T>> = unsafe { this.nonnull.add(index) };
+      let mut ptr: NonNull<MaybeUninit<T>> = unsafe { this.nonnull.add(index) };
 
       // SAFETY: Pointer is valid and aligned; we have exclusive access.
-      let uninit: &mut MaybeUninit<T> = unsafe { &mut *ptr.as_ptr() };
+      let uninit: &mut MaybeUninit<T> = unsafe { ptr.as_mut() };
 
       init(index, uninit);
 
