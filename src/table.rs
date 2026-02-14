@@ -7,11 +7,12 @@
 use core::fmt::Debug;
 use core::fmt::DebugMap;
 use core::fmt::Formatter;
-use core::fmt::Result as FmtResult;
+use core::fmt::Result;
 use core::hint;
 use core::marker::PhantomData;
 use core::mem;
 use core::mem::MaybeUninit;
+use core::ptr::NonNull;
 
 use sdd::AtomicOwned;
 use sdd::Guard;
@@ -151,7 +152,8 @@ where
   #[inline]
   pub(crate) fn exists(&self, key: Detached) -> bool {
     let guard: Guard = Guard::new();
-    let value: Ptr<'_, T> = self.entry(key, &guard);
+    let index: Concrete<P> = Concrete::from_detached(key);
+    let value: Ptr<'_, T> = self.entry(index, &guard);
 
     !value.is_null()
   }
@@ -162,7 +164,8 @@ where
     F: Fn(&T) -> R,
   {
     let guard: Guard = Guard::new();
-    let value: Ptr<'_, T> = self.entry(key, &guard);
+    let index: Concrete<P> = Concrete::from_detached(key);
+    let value: Ptr<'_, T> = self.entry(index, &guard);
 
     // SAFETY: Tag bits are never set on data pointers.
     match unsafe { value.as_ref_unchecked() } {
@@ -177,7 +180,8 @@ where
     T: Copy,
   {
     let guard: Guard = Guard::new();
-    let value: Ptr<'_, T> = self.entry(key, &guard);
+    let index: Concrete<P> = Concrete::from_detached(key);
+    let value: Ptr<'_, T> = self.entry(index, &guard);
 
     // SAFETY: No tag bits are set on these pointers.
     match unsafe { value.as_ref_unchecked() } {
@@ -187,12 +191,13 @@ where
   }
 
   #[inline]
-  fn entry<'guard>(&self, key: Detached, guard: &'guard Guard) -> Ptr<'guard, T> {
-    self
-      .readonly
-      .data
-      .get(Concrete::from_detached(key))
-      .load(Acquire, guard)
+  pub(crate) fn weak_keys(&self) -> WeakKeys<'_, T, P> {
+    WeakKeys::new(self)
+  }
+
+  #[inline]
+  fn entry<'guard>(&self, index: Concrete<P>, guard: &'guard Guard) -> Ptr<'guard, T> {
+    self.readonly.data.get(index).load(Acquire, guard)
   }
 
   #[inline]
@@ -321,7 +326,7 @@ where
   T: Debug,
   P: Params + ?Sized,
 {
-  fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
+  fn fmt(&self, f: &mut Formatter<'_>) -> Result {
     let mut debug: DebugMap<'_, '_> = f.debug_map();
     let guard: Guard = Guard::new();
 
@@ -468,5 +473,101 @@ where
     Self {
       marker: PhantomData,
     }
+  }
+}
+
+// -----------------------------------------------------------------------------
+// Keys Iterator - Weak Guarantees
+// -----------------------------------------------------------------------------
+
+/// Iterator over indices in a [`PTab`] with weak snapshot semantics.
+///
+/// `WeakKeys` performs a lock-free scan of the underlying table and yields
+/// [`Detached`] indices for entries observed as present.
+///
+/// # Consistency Model
+///
+/// This iterator is **weakly consistent**:
+///
+/// - It does not guarantee a consistent snapshot.
+/// - It does not prevent concurrent insertions or removals.
+/// - It never yields an index that was never fully initialized.
+/// - It may miss entries that were present when iteration began.
+/// - It may yield entries that are removed immediately afterward.
+///
+/// [`PTab`]: crate::public::PTab
+pub struct WeakKeys<'table, T, P>
+where
+  P: Params + ?Sized,
+{
+  array: NonNull<AtomicOwned<T>>,
+  guard: Guard,
+  index: usize,
+  table: PhantomData<&'table ReadOnly<T, P>>,
+}
+
+impl<'table, T, P> WeakKeys<'table, T, P>
+where
+  P: Params + ?Sized,
+{
+  #[inline]
+  pub(crate) fn new(table: &'table Table<T, P>) -> Self {
+    Self {
+      array: table.readonly.data.as_nonnull(),
+      guard: Guard::new(),
+      index: 0,
+      table: PhantomData,
+    }
+  }
+}
+
+impl<T, P> Debug for WeakKeys<'_, T, P>
+where
+  P: Params + ?Sized,
+{
+  fn fmt(&self, f: &mut Formatter<'_>) -> Result {
+    f.write_str("WeakKeys(..)")
+  }
+}
+
+impl<T, P> Iterator for WeakKeys<'_, T, P>
+where
+  P: Params + ?Sized,
+{
+  type Item = Detached;
+
+  #[inline]
+  fn next(&mut self) -> Option<Self::Item> {
+    let capapcity: usize = P::LENGTH.as_usize();
+    let mut index: usize = self.index;
+
+    while index < capapcity {
+      let abstract_idx: Abstract<P> = Abstract::new(index);
+      let concrete_idx: Concrete<P> = Concrete::from_abstract(abstract_idx);
+
+      index += 1;
+
+      let ptr: Ptr<'_, T> = {
+        // SAFETY: `Concrete<P>` indices are always less than `P::LENGTH`.
+        let raw: NonNull<AtomicOwned<T>> = unsafe { self.array.add(concrete_idx.get()) };
+
+        // SAFETY: Pointer is valid and aligned.
+        let data: &AtomicOwned<T> = unsafe { raw.as_ref() };
+
+        data.load(Acquire, &self.guard)
+      };
+
+      if ptr.is_null() {
+        continue;
+      }
+
+      self.index = index;
+
+      return Some(Detached::from_abstract(abstract_idx));
+    }
+
+    self.index = index;
+
+    None
   }
 }

@@ -136,6 +136,7 @@ pub use self::params::DefaultParams;
 pub use self::params::Params;
 pub use self::params::ParamsExt;
 pub use self::public::PTab;
+pub use self::table::WeakKeys;
 
 mod alloc {
   #[cfg(loom)]
