@@ -30,7 +30,7 @@ fn capacity_exact() {
 
 #[test]
 fn capacity_default() {
-  assert_eq!(Capacity::DEF, Default::default());
+  assert_eq!(Capacity::DEF, Capacity::default());
 }
 
 #[test]
@@ -153,12 +153,12 @@ fn entry_mask_covers_all_indices() {
 fn derive_blocks() {
   each_capacity!({
     assert_eq!(P::BLOCKS, params::derive_blocks::<P>());
-  })
+  });
 }
 
 #[test]
 fn derive_layout() {
   each_capacity!({
     assert_eq!(P::LAYOUT, params::derive_layout::<P>());
-  })
+  });
 }

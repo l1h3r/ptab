@@ -7,22 +7,24 @@ use crate::params::CACHE_LINE_SLOTS;
 use crate::params::Params;
 use crate::params::ParamsExt;
 
+#[expect(clippy::clone_on_copy)]
 #[test]
 fn abstract_clone_copy() {
   let a: Abstract<()> = Abstract::new(123);
   let b: Abstract<()> = a.clone();
-  let c: Abstract<()> = *&b;
+  let c: Abstract<()> = b;
 
   assert_eq!(a, b);
   assert_eq!(b, c);
   assert_eq!(c, a);
 }
 
+#[expect(clippy::clone_on_copy)]
 #[test]
 fn concrete_clone_copy() {
   let a: Concrete<()> = Concrete::new(123);
   let b: Concrete<()> = a.clone();
-  let c: Concrete<()> = *&b;
+  let c: Concrete<()> = b;
 
   assert_eq!(a, b);
   assert_eq!(b, c);

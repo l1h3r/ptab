@@ -438,7 +438,7 @@ fn weak_keys() {
     keys.push(table.insert(0).unwrap());
   }
 
-  let new: Vec<Detached> = Vec::from_iter(table.weak_keys());
+  let new: Vec<Detached> = table.weak_keys().collect();
 
   for (init_key, iter_key) in keys.into_iter().zip(new.into_iter()) {
     assert_eq!(init_key, iter_key);
