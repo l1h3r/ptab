@@ -16,7 +16,7 @@ macro_rules! internal_index {
     #[repr(transparent)]
     pub(crate) struct $name<P>
     where
-      P: $crate::params::Params + ?Sized,
+      P: ?Sized,
     {
       source: usize,
       marker: ::core::marker::PhantomData<fn(P)>,
@@ -24,7 +24,7 @@ macro_rules! internal_index {
 
     impl<P> $name<P>
     where
-      P: $crate::params::Params + ?Sized,
+      P: ?Sized,
     {
       #[inline]
       pub(crate) const fn new(source: usize) -> Self {
@@ -42,7 +42,7 @@ macro_rules! internal_index {
 
     impl<P> Clone for $name<P>
     where
-      P: $crate::params::Params + ?Sized,
+      P: ?Sized,
     {
       #[inline]
       fn clone(&self) -> Self {
@@ -50,11 +50,11 @@ macro_rules! internal_index {
       }
     }
 
-    impl<P> Copy for $name<P> where P: $crate::params::Params + ?Sized {}
+    impl<P> Copy for $name<P> where P: ?Sized {}
 
     impl<P> ::core::cmp::PartialEq for $name<P>
     where
-      P: $crate::params::Params + ?Sized,
+      P: ?Sized,
     {
       #[inline]
       fn eq(&self, other: &Self) -> bool {
@@ -64,7 +64,7 @@ macro_rules! internal_index {
 
     impl<P> ::core::fmt::Debug for $name<P>
     where
-      P: $crate::params::Params + ?Sized,
+      P: ?Sized,
     {
       fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
         ::core::fmt::Debug::fmt(&self.source, f)
@@ -90,7 +90,7 @@ macro_rules! internal_index {
 ///
 /// # Examples
 ///
-/// ```no_run
+/// ```
 /// use ptab::PTab;
 ///
 /// let table: PTab<i32> = PTab::new();

@@ -67,7 +67,7 @@ const _: () = assert!(
 /// Allows customizing table capacity at compile time. The simplest approach
 /// is [`ConstParams`]:
 ///
-/// ```no_run
+/// ```
 /// use ptab::{PTab, ConstParams};
 ///
 /// type MyTable<T> = PTab<T, ConstParams<8192>>;
@@ -112,7 +112,7 @@ pub trait Params {
 ///
 /// # Example
 ///
-/// ```no_run
+/// ```
 /// use ptab::{ParamsExt, ConstParams};
 ///
 /// println!("{:#?}", <ConstParams<1024> as ParamsExt>::debug());
@@ -187,7 +187,7 @@ where
 ///
 /// # Example
 ///
-/// ```no_run
+/// ```
 /// use ptab::{PTab, DefaultParams};
 ///
 /// // These are equivalent:
@@ -222,14 +222,14 @@ impl Params for DefaultParams {
 ///
 /// # Examples
 ///
-/// ```no_run
+/// ```
 /// use ptab::{PTab, ConstParams};
 ///
 /// let table: PTab<String, ConstParams<4096>> = PTab::new();
 /// assert_eq!(table.capacity(), 4096);
 /// ```
 ///
-/// ```no_run
+/// ```
 /// use ptab::{PTab, ConstParams};
 ///
 /// // Values are rounded up to powers of two
@@ -241,7 +241,7 @@ impl Params for DefaultParams {
 ///
 /// For frequently-used configurations, define a type alias:
 ///
-/// ```no_run
+/// ```
 /// use ptab::{PTab, ConstParams};
 ///
 /// type SmallTable<T> = PTab<T, ConstParams<64>>;
@@ -282,7 +282,7 @@ impl<P> ParamsExt for P where P: Params + ?Sized {}
 /// Use [`new()`] to create from an arbitrary value; it rounds up to the nearest
 /// power of two and clamps to the valid range.
 ///
-/// ```no_run
+/// ```
 /// use ptab::Capacity;
 ///
 /// // Exact power of two
@@ -317,7 +317,17 @@ impl Capacity {
   pub const MAX: Self = Self(CapacityEnum::_Capacity1Shl27);
 
   /// The default capacity (2²⁰ entries).
-  pub const DEF: Self = Self(CapacityEnum::_Capacity1Shl20);
+  pub const DEF: Self = {
+    #[cfg(not(miri))]
+    {
+      Self(CapacityEnum::_Capacity1Shl20)
+    }
+
+    #[cfg(miri)]
+    {
+      Self::MIN
+    }
+  };
 
   /// Creates a new [`Capacity`] from an arbitrary value.
   ///
@@ -326,7 +336,7 @@ impl Capacity {
   ///
   /// # Examples
   ///
-  /// ```no_run
+  /// ```
   /// use ptab::Capacity;
   ///
   /// assert_eq!(Capacity::new(100).as_usize(), 128);
@@ -386,7 +396,7 @@ impl Capacity {
   ///
   /// # Examples
   ///
-  /// ```no_run
+  /// ```
   /// use ptab::Capacity;
   ///
   /// assert_eq!(Capacity::new(1024).log2(), 10);
@@ -457,7 +467,7 @@ enum CapacityEnum {
 // Misc. Utilities
 // -----------------------------------------------------------------------------
 
-const fn derive_blocks<P>() -> NonZeroUsize
+pub(crate) const fn derive_blocks<P>() -> NonZeroUsize
 where
   P: Params + ?Sized,
 {
@@ -486,7 +496,7 @@ where
   blocks
 }
 
-const fn derive_layout<P>() -> Layout
+pub(crate) const fn derive_layout<P>() -> Layout
 where
   P: Params + ?Sized,
 {

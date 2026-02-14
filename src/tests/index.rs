@@ -7,12 +7,68 @@ use crate::params::CACHE_LINE_SLOTS;
 use crate::params::Params;
 use crate::params::ParamsExt;
 
+#[expect(clippy::clone_on_copy)]
+#[test]
+fn abstract_clone_copy() {
+  let a: Abstract<()> = Abstract::new(123);
+  let b: Abstract<()> = a.clone();
+  let c: Abstract<()> = b;
+
+  assert_eq!(a, b);
+  assert_eq!(b, c);
+  assert_eq!(c, a);
+}
+
+#[expect(clippy::clone_on_copy)]
+#[test]
+fn concrete_clone_copy() {
+  let a: Concrete<()> = Concrete::new(123);
+  let b: Concrete<()> = a.clone();
+  let c: Concrete<()> = b;
+
+  assert_eq!(a, b);
+  assert_eq!(b, c);
+  assert_eq!(c, a);
+}
+
+#[test]
+fn abstract_debug_transparency() {
+  let value: usize = 123;
+  let index: Abstract<()> = Abstract::new(value);
+
+  assert_eq!(format!("{index:?}"), format!("{value:?}"));
+}
+
+#[test]
+fn concrete_debug_transparency() {
+  let value: usize = 123;
+  let index: Concrete<()> = Concrete::new(value);
+
+  assert_eq!(format!("{index:?}"), format!("{value:?}"));
+}
+
+#[test]
+fn detached_debug_transparency() {
+  let value: usize = 123;
+  let index: Detached = Detached::from_bits(value);
+
+  assert_eq!(format!("{index:?}"), format!("{value:?}"));
+}
+
+#[test]
+fn detached_display_transparency() {
+  let value: usize = 123;
+  let index: Detached = Detached::from_bits(value);
+
+  assert_eq!(format!("{index}"), format!("{value}"));
+}
+
 #[cfg_attr(
   not(feature = "slow"),
   ignore = "enable the 'slow' feature to run this test."
 )]
 #[test]
-fn test_abstract_to_concrete_covers_all_slots() {
+fn abstract_to_concrete_covers_all_slots() {
   each_capacity!({
     let mut used: HashSet<usize> = HashSet::with_capacity(P::LENGTH.as_usize());
 
@@ -26,7 +82,8 @@ fn test_abstract_to_concrete_covers_all_slots() {
     assert_eq!(
       used.len(),
       P::LENGTH.as_usize(),
-      "invalid id mapping: abstract fails to cover all concrete slots",
+      "invalid id mapping: abstract fails to cover all concrete slots - {:?}",
+      P::debug(),
     );
   });
 }
@@ -36,7 +93,7 @@ fn test_abstract_to_concrete_covers_all_slots() {
   ignore = "enable the 'slow' feature to run this test."
 )]
 #[test]
-fn test_abstract_to_detached_roundtrip() {
+fn abstract_to_detached_roundtrip() {
   each_capacity!({
     for index in 0..P::LENGTH.as_usize() {
       let abstract_idx: Abstract<P> = Abstract::new(index);
@@ -58,7 +115,7 @@ fn test_abstract_to_detached_roundtrip() {
   ignore = "enable the 'slow' feature to run this test."
 )]
 #[test]
-fn test_detached_to_concrete_matches_direct_conversion() {
+fn detached_to_concrete_matches_direct_conversion() {
   each_capacity!({
     for index in 0..P::LENGTH.as_usize() {
       let abstract_idx: Abstract<P> = Abstract::new(index);
@@ -77,7 +134,7 @@ fn test_detached_to_concrete_matches_direct_conversion() {
 }
 
 #[test]
-fn test_cache_line_distribution() {
+fn cache_line_distribution() {
   // Verify that consecutive base indices are distributed across cache lines
   each_capacity!({
     if P::BLOCKS.get() <= 1 {
@@ -108,7 +165,7 @@ fn test_cache_line_distribution() {
   ignore = "enable the 'slow' feature to run this test."
 )]
 #[test]
-fn test_serial_number_preservation() {
+fn serial_number_preservation() {
   each_capacity!({
     for generation in 0..16 {
       let serial: usize = generation * P::LENGTH.as_usize();

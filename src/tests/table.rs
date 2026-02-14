@@ -7,13 +7,12 @@ use sdd::Guard;
 use crate::index::Detached;
 use crate::params::Capacity;
 use crate::params::ConstParams;
+use crate::params::DefaultParams;
 use crate::table::Table;
-
-type TestParams = ConstParams<64>;
 
 #[cfg(not(miri))]
 #[test]
-fn test_new() {
+fn new() {
   let table: Table<usize, ConstParams<{ Capacity::DEF.as_usize() }>> = Table::new();
 
   assert_eq!(table.cap(), Capacity::DEF.as_usize());
@@ -22,8 +21,8 @@ fn test_new() {
 }
 
 #[test]
-fn test_insert_single() {
-  let table: Table<usize, TestParams> = Table::new();
+fn insert_single() {
+  let table: Table<usize, DefaultParams> = Table::new();
   let guard: Guard = Guard::new();
   let index: Detached = table.insert(123).unwrap();
 
@@ -34,16 +33,16 @@ fn test_insert_single() {
 }
 
 #[test]
-fn test_insert_multiple() {
-  let table: Table<usize, TestParams> = Table::new();
+fn insert_multiple() {
+  let table: Table<usize, DefaultParams> = Table::new();
   let guard: Guard = Guard::new();
-  let mut keys: Vec<Detached> = Vec::with_capacity(32);
+  let mut keys: Vec<Detached> = Vec::with_capacity(16);
 
-  for index in 0..32 {
+  for index in 0..16 {
     keys.push(table.insert(index * 100).unwrap());
   }
 
-  assert_eq!(table.len(), 32);
+  assert_eq!(table.len(), 16);
 
   for (index, key) in keys.iter().enumerate() {
     assert_eq!(table.read(*key, &guard), Some(index * 100));
@@ -51,8 +50,8 @@ fn test_insert_multiple() {
 }
 
 #[test]
-fn test_insert_unique_ids() {
-  let table: Table<usize, TestParams> = Table::new();
+fn insert_unique_ids() {
+  let table: Table<usize, DefaultParams> = Table::new();
   let mut keys: HashSet<Detached> = HashSet::new();
 
   for _ in 0..table.cap() {
@@ -61,8 +60,8 @@ fn test_insert_unique_ids() {
 }
 
 #[test]
-fn test_insert_maximum() {
-  let table: Table<usize, TestParams> = Table::new();
+fn insert_maximum() {
+  let table: Table<usize, DefaultParams> = Table::new();
 
   for index in 0..table.cap() {
     assert!(table.insert(index).is_some());
@@ -73,8 +72,8 @@ fn test_insert_maximum() {
 }
 
 #[test]
-fn test_write_callback_receives_correct_index() {
-  let table: Table<usize, TestParams> = Table::new();
+fn write_callback_receives_correct_index() {
+  let table: Table<usize, DefaultParams> = Table::new();
   let guard: Guard = Guard::new();
 
   let index: Detached = table
@@ -87,8 +86,8 @@ fn test_write_callback_receives_correct_index() {
 }
 
 #[test]
-fn test_remove_existing() {
-  let table: Table<usize, TestParams> = Table::new();
+fn remove_existing() {
+  let table: Table<usize, DefaultParams> = Table::new();
   let guard: Guard = Guard::new();
   let index: Detached = table.insert(123).unwrap();
 
@@ -103,8 +102,8 @@ fn test_remove_existing() {
 }
 
 #[test]
-fn test_remove_nonexistent() {
-  let table: Table<usize, TestParams> = Table::new();
+fn remove_nonexistent() {
+  let table: Table<usize, DefaultParams> = Table::new();
   let index: Detached = table.insert(123).unwrap();
 
   assert!(table.remove(index));
@@ -112,8 +111,8 @@ fn test_remove_nonexistent() {
 }
 
 #[test]
-fn test_remove_isolation() {
-  let table: Table<usize, TestParams> = Table::new();
+fn remove_isolation() {
+  let table: Table<usize, DefaultParams> = Table::new();
   let guard: Guard = Guard::new();
   let mut keys: Vec<Detached> = Vec::with_capacity(16);
 
@@ -137,8 +136,8 @@ fn test_remove_isolation() {
 }
 
 #[test]
-fn test_remove_recycling() {
-  let table: Table<usize, TestParams> = Table::new();
+fn remove_recycling() {
+  let table: Table<usize, DefaultParams> = Table::new();
   let guard: Guard = Guard::new();
   let mut keys: Vec<Detached> = Vec::with_capacity(table.cap() - 1);
 
@@ -157,8 +156,8 @@ fn test_remove_recycling() {
 }
 
 #[test]
-fn test_exists_existing() {
-  let table: Table<usize, TestParams> = Table::new();
+fn exists_existing() {
+  let table: Table<usize, DefaultParams> = Table::new();
   let guard: Guard = Guard::new();
   let index: Detached = table.insert(123).unwrap();
 
@@ -166,8 +165,8 @@ fn test_exists_existing() {
 }
 
 #[test]
-fn test_exists_nonexistent() {
-  let table: Table<usize, TestParams> = Table::new();
+fn exists_nonexistent() {
+  let table: Table<usize, DefaultParams> = Table::new();
   let guard: Guard = Guard::new();
   let index: Detached = table.insert(123).unwrap();
 
@@ -176,8 +175,8 @@ fn test_exists_nonexistent() {
 }
 
 #[test]
-fn test_exists_multiple() {
-  let table: Table<usize, TestParams> = Table::new();
+fn exists_multiple() {
+  let table: Table<usize, DefaultParams> = Table::new();
   let guard: Guard = Guard::new();
 
   let index1: Detached = table.insert(1).unwrap();
@@ -196,8 +195,8 @@ fn test_exists_multiple() {
 }
 
 #[test]
-fn test_with_value() {
-  let table: Table<usize, TestParams> = Table::new();
+fn with_value() {
+  let table: Table<usize, DefaultParams> = Table::new();
   let guard: Guard = Guard::new();
   let index: Detached = table.insert(12345).unwrap();
 
@@ -205,8 +204,8 @@ fn test_with_value() {
 }
 
 #[test]
-fn test_with_return_value() {
-  let table: Table<usize, TestParams> = Table::new();
+fn with_return_value() {
+  let table: Table<usize, DefaultParams> = Table::new();
   let guard: Guard = Guard::new();
   let index: Detached = table.insert(123).unwrap();
 
@@ -214,8 +213,8 @@ fn test_with_return_value() {
 }
 
 #[test]
-fn test_with_nonexistent() {
-  let table: Table<usize, TestParams> = Table::new();
+fn with_nonexistent() {
+  let table: Table<usize, DefaultParams> = Table::new();
   let guard: Guard = Guard::new();
   let index: Detached = table.insert(123).unwrap();
 
@@ -224,8 +223,8 @@ fn test_with_nonexistent() {
 }
 
 #[test]
-fn test_with_multiple() {
-  let table: Table<usize, TestParams> = Table::new();
+fn with_multiple() {
+  let table: Table<usize, DefaultParams> = Table::new();
   let guard: Guard = Guard::new();
   let index: Detached = table.insert(123).unwrap();
 
@@ -235,8 +234,8 @@ fn test_with_multiple() {
 }
 
 #[test]
-fn test_len_tracks_insertions() {
-  let table: Table<usize, TestParams> = Table::new();
+fn len_tracks_insertions() {
+  let table: Table<usize, DefaultParams> = Table::new();
 
   for index in 0..16 {
     assert!(table.insert(0).is_some());
@@ -245,8 +244,8 @@ fn test_len_tracks_insertions() {
 }
 
 #[test]
-fn test_len_tracks_removals() {
-  let table: Table<usize, TestParams> = Table::new();
+fn len_tracks_removals() {
+  let table: Table<usize, DefaultParams> = Table::new();
   let mut keys: Vec<Detached> = Vec::with_capacity(16);
 
   for _ in 0..16 {
@@ -260,8 +259,8 @@ fn test_len_tracks_removals() {
 }
 
 #[test]
-fn test_is_empty() {
-  let table: Table<usize, TestParams> = Table::new();
+fn is_empty() {
+  let table: Table<usize, DefaultParams> = Table::new();
 
   assert!(table.is_empty());
 
@@ -273,8 +272,8 @@ fn test_is_empty() {
 }
 
 #[test]
-fn test_interleaved_insert_remove() {
-  let table: Table<usize, TestParams> = Table::new();
+fn interleaved_insert_remove() {
+  let table: Table<usize, DefaultParams> = Table::new();
   let guard: Guard = Guard::new();
   let mut keys: Vec<Detached> = Vec::with_capacity(16);
 
@@ -299,8 +298,8 @@ fn test_interleaved_insert_remove() {
 }
 
 #[test]
-fn test_multiple_refills() {
-  let table: Table<usize, TestParams> = Table::new();
+fn multiple_refills() {
+  let table: Table<usize, DefaultParams> = Table::new();
   let guard: Guard = Guard::new();
 
   for round in 0..3 {
@@ -323,10 +322,10 @@ fn test_multiple_refills() {
 }
 
 #[test]
-fn test_uniqueness_across_multiple_generations() {
+fn uniqueness_across_multiple_generations() {
   const GENS: usize = 10;
 
-  let table: Table<usize, TestParams> = Table::new();
+  let table: Table<usize, DefaultParams> = Table::new();
   let mut key_set: HashSet<usize> = HashSet::with_capacity(GENS * 16);
 
   for _ in 0..GENS {
@@ -347,7 +346,7 @@ fn test_uniqueness_across_multiple_generations() {
 }
 
 #[test]
-fn test_min_capacity_operations() {
+fn min_capacity_operations() {
   type Params = ConstParams<{ Capacity::MIN.as_usize() }>;
 
   let table: Table<usize, Params> = Table::new();
@@ -364,11 +363,11 @@ fn test_min_capacity_operations() {
 }
 
 #[cfg_attr(
-  not(feature = "slow"),
+  any(miri, not(feature = "slow")),
   ignore = "enable the 'slow' feature to run this test."
 )]
 #[test]
-fn test_max_capacity_operations() {
+fn max_capacity_operations() {
   type Params = ConstParams<{ Capacity::MAX.as_usize() }>;
 
   let table: Table<usize, Params> = Table::new();
@@ -378,7 +377,7 @@ fn test_max_capacity_operations() {
 }
 
 #[test]
-fn test_drop() {
+fn drop_slow() {
   static COUNT: AtomicU32 = AtomicU32::new(0);
 
   struct DropMe;
@@ -396,14 +395,14 @@ fn test_drop() {
     }
   }
 
-  let drop_0: Table<DropMe, TestParams> = Table::new();
+  let drop_0: Table<DropMe, DefaultParams> = Table::new();
 
   assert_eq!(COUNT.load(Ordering::Relaxed), 0);
   assert_eq!(COUNT.load(Ordering::Relaxed), drop_0.len());
   drop(drop_0);
   assert_eq!(COUNT.load(Ordering::Relaxed), 0);
 
-  let drop_1: Table<DropMe, TestParams> = {
+  let drop_1: Table<DropMe, DefaultParams> = {
     let this = Table::new();
     this.insert(DropMe::new()).unwrap();
     this
@@ -414,7 +413,7 @@ fn test_drop() {
   drop(drop_1);
   assert_eq!(COUNT.load(Ordering::Relaxed), 0);
 
-  let drop_full: Table<DropMe, TestParams> = {
+  let drop_full: Table<DropMe, DefaultParams> = {
     let this = Table::new();
 
     for _ in 0..this.cap() {
@@ -428,4 +427,23 @@ fn test_drop() {
   assert_eq!(COUNT.load(Ordering::Relaxed), drop_full.len());
   drop(drop_full);
   assert_eq!(COUNT.load(Ordering::Relaxed), 0);
+}
+
+#[test]
+fn weak_keys() {
+  let table: Table<usize, DefaultParams> = Table::new();
+  let mut keys: Vec<Detached> = Vec::with_capacity(16);
+
+  for _ in 0..16 {
+    keys.push(table.insert(0).unwrap());
+  }
+
+  let new: Vec<Detached> = table.weak_keys().collect();
+
+  for (init_key, iter_key) in keys.into_iter().zip(new.into_iter()) {
+    assert_eq!(init_key, iter_key);
+    assert!(table.remove(init_key));
+  }
+
+  assert_eq!(table.weak_keys().next(), None);
 }

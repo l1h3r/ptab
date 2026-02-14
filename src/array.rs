@@ -41,7 +41,7 @@ where
 
     while index < P::LENGTH.as_usize() {
       // SAFETY: `index < P::LENGTH` and allocation holds `P::LENGTH` elements.
-      let mut ptr: NonNull<MaybeUninit<T>> = unsafe { this.nonnull.add(index) };
+      let mut ptr: NonNull<MaybeUninit<T>> = unsafe { this.as_nonnull().add(index) };
 
       // SAFETY: Pointer is valid and aligned; we have exclusive access.
       let uninit: &mut MaybeUninit<T> = unsafe { ptr.as_mut() };
@@ -63,7 +63,7 @@ where
 
     // SAFETY: Allocation holds `P::LENGTH` elements; zeroing `MaybeUninit` is valid.
     unsafe {
-      this.nonnull.write_bytes(0, P::LENGTH.as_usize());
+      this.as_nonnull().write_bytes(0, P::LENGTH.as_usize());
     }
 
     this
@@ -95,13 +95,13 @@ where
   /// Returns a raw pointer to the array.
   #[inline]
   pub(crate) const fn as_ptr(&self) -> *const T {
-    self.nonnull.as_ptr()
+    self.as_nonnull().as_ptr()
   }
 
   /// Returns a raw mutable pointer to the array.
   #[inline]
   pub(crate) const fn as_mut_ptr(&self) -> *mut T {
-    self.nonnull.as_ptr()
+    self.as_nonnull().as_ptr()
   }
 
   #[inline]
@@ -138,7 +138,7 @@ where
     );
 
     // SAFETY: Caller guarantees `index < P::LENGTH`.
-    unsafe { self.nonnull.add(index).as_ref() }
+    unsafe { self.as_nonnull().add(index).as_ref() }
   }
 }
 
@@ -157,7 +157,7 @@ where
   pub(crate) unsafe fn assume_init(self) -> Array<T, P> {
     Array {
       // Prevent drop from running on `self` (would deallocate).
-      nonnull: ManuallyDrop::new(self).nonnull.cast(),
+      nonnull: ManuallyDrop::new(self).as_nonnull().cast(),
       phantom: PhantomData,
     }
   }
@@ -170,7 +170,7 @@ where
   fn drop(&mut self) {
     // SAFETY: Allocated with `P::LAYOUT` in `new_uninit`.
     unsafe {
-      dealloc(self.nonnull.cast().as_ptr(), P::LAYOUT);
+      dealloc(self.as_nonnull().cast().as_ptr(), P::LAYOUT);
     }
   }
 }

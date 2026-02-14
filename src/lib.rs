@@ -13,7 +13,7 @@
 //!
 //! # Usage
 //!
-//! ```no_run
+//! ```
 //! use ptab::PTab;
 //!
 //! // Create a table with default capacity
@@ -39,7 +39,7 @@
 //! The default configuration ([`DefaultParams`]) provides [`Capacity::DEF`]
 //! slots:
 //!
-//! ```no_run
+//! ```
 //! use ptab::{PTab, DefaultParams};
 //!
 //! // These are equivalent:
@@ -49,7 +49,7 @@
 //!
 //! For custom capacities, use [`ConstParams`]:
 //!
-//! ```no_run
+//! ```
 //! use ptab::{PTab, ConstParams};
 //!
 //! let table: PTab<u64, ConstParams<4096>> = PTab::new();
