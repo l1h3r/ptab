@@ -76,7 +76,7 @@ rust-2024-compatibility = { level = "deny", priority = -1 }
 unused = { level = "deny", priority = -1 }
 
 # Standalone Lints
-unexpected_cfgs = { level = "warn", check-cfg = ["cfg(loom,shuttle)"] }
+unexpected_cfgs = { level = "warn", check-cfg = ["cfg(coverage,coverage_nightly,loom,shuttle)"] }
 
 # ------------------------------------------------------------------------------
 # Clippy Lints
