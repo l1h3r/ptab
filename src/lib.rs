@@ -112,15 +112,18 @@
 //! [`sdd`]: https://docs.rs/sdd
 //!
 
+#![cfg_attr(coverage_nightly, feature(coverage_attribute))]
+
 mod array;
 mod index;
 mod padded;
 mod params;
 mod public;
 mod table;
+mod utils;
 
-#[cfg(all(test, not(any(loom, shuttle))))]
-mod tests;
+pub(crate) use crate::utils::alloc;
+pub(crate) use crate::utils::sync;
 
 pub mod implementation {
   #![doc = include_str!("../IMPLEMENTATION.md")]
@@ -137,77 +140,3 @@ pub use self::params::Params;
 pub use self::params::ParamsExt;
 pub use self::public::PTab;
 pub use self::table::WeakKeys;
-
-mod alloc {
-  #[cfg(loom)]
-  mod exports {
-    pub(crate) use ::loom::alloc::alloc;
-    pub(crate) use ::loom::alloc::dealloc;
-    pub(crate) use ::std::alloc::handle_alloc_error;
-  }
-
-  #[cfg(not(loom))]
-  mod exports {
-    pub(crate) use ::std::alloc::alloc;
-    pub(crate) use ::std::alloc::dealloc;
-    pub(crate) use ::std::alloc::handle_alloc_error;
-  }
-
-  pub(crate) use self::exports::*;
-}
-
-mod sync {
-  #[cfg(all(loom, shuttle))]
-  compile_error!("cannot use loom and shuttle at once");
-
-  #[cfg(not(any(loom, shuttle)))]
-  mod exports {
-    pub(crate) mod atomic {
-      pub(crate) use ::core::sync::atomic::AtomicU32;
-      pub(crate) use ::core::sync::atomic::AtomicUsize;
-      pub(crate) use ::core::sync::atomic::Ordering;
-    }
-  }
-
-  #[cfg(loom)]
-  mod exports {
-    pub(crate) mod atomic {
-      pub(crate) use ::loom::sync::atomic::AtomicU32;
-      pub(crate) use ::loom::sync::atomic::AtomicUsize;
-      pub(crate) use ::loom::sync::atomic::Ordering;
-    }
-  }
-
-  #[cfg(shuttle)]
-  mod exports {
-    pub(crate) mod atomic {
-      #[repr(transparent)]
-      pub(crate) struct AtomicUsize {
-        inner: Box<::shuttle::sync::atomic::AtomicUsize>,
-      }
-
-      impl AtomicUsize {
-        #[inline]
-        pub(crate) fn new(value: usize) -> Self {
-          Self {
-            inner: Box::new(::shuttle::sync::atomic::AtomicUsize::new(value)),
-          }
-        }
-      }
-
-      impl ::core::ops::Deref for AtomicUsize {
-        type Target = ::shuttle::sync::atomic::AtomicUsize;
-
-        #[inline]
-        fn deref(&self) -> &Self::Target {
-          &self.inner
-        }
-      }
-
-      pub(crate) use ::shuttle::sync::atomic::AtomicU32;
-      pub(crate) use ::shuttle::sync::atomic::Ordering;
-    }
-  }
-
-  pub(crate) use self::exports::*;
-}
