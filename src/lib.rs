@@ -112,8 +112,6 @@
 //! [`sdd`]: https://docs.rs/sdd
 //!
 
-#![cfg_attr(coverage_nightly, feature(coverage_attribute))]
-
 mod array;
 mod index;
 mod padded;
