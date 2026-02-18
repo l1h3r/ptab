@@ -7,6 +7,7 @@ use core::ptr::NonNull;
 use core::sync::atomic::AtomicPtr;
 use core::sync::atomic::Ordering;
 
+#[allow(dead_code, reason = "not used by loom/shuttle tests")]
 #[cfg(test)]
 #[inline]
 pub(crate) fn try_reclaim() {

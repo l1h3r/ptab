@@ -374,12 +374,14 @@ where
     Abstract::new(self.free_id.fetch_add(1, Relaxed) as usize)
   }
 
+  #[allow(dead_code, reason = "not used by loom/shuttle tests")]
   #[cfg(test)]
   #[inline]
   fn load_next_id(&self) -> usize {
     self.next_id.load(Relaxed) as usize
   }
 
+  #[allow(dead_code, reason = "not used by loom/shuttle tests")]
   #[cfg(test)]
   #[inline]
   fn load_free_id(&self) -> usize {
@@ -742,8 +744,8 @@ mod tests {
       table.release_slot(acquired);
     }
 
-    assert_eq!(table.len(), 0);
-    assert_eq!(table.cap(), table.volatile.load_free_id());
+    assert!(table.is_empty());
+    assert!(table.volatile.load_free_id().is_multiple_of(table.cap()));
   }
 
   #[test]

@@ -52,8 +52,8 @@
 //! ```
 //! use ptab::{PTab, ConstParams};
 //!
-//! let table: PTab<u64, ConstParams<4096>> = PTab::new();
-//! assert_eq!(table.capacity(), 4096);
+//! let table: PTab<u64, ConstParams<512>> = PTab::new();
+//! assert_eq!(table.capacity(), 512);
 //! ```
 //!
 //! Capacity is always rounded up to the nearest power of two and clamped

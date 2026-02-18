@@ -4,7 +4,9 @@ macro_rules! each_capacity {
     {
       $crate::utils::each_capacity!(
         @impl $expr,
-        4, 10, 16,
+        $crate::params::Capacity::DEF.log2(),
+        $crate::params::Capacity::MAX.log2(),
+        $crate::params::Capacity::MIN.log2(),
       );
     }
 

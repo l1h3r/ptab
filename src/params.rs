@@ -179,16 +179,16 @@ impl Params for DefaultParams {
 /// ```
 /// use ptab::{PTab, ConstParams};
 ///
-/// let table: PTab<String, ConstParams<4096>> = PTab::new();
-/// assert_eq!(table.capacity(), 4096);
+/// let table: PTab<String, ConstParams<512>> = PTab::new();
+/// assert_eq!(table.capacity(), 512);
 /// ```
 ///
 /// ```
 /// use ptab::{PTab, ConstParams};
 ///
 /// // Values are rounded up to powers of two
-/// let table: PTab<String, ConstParams<1000>> = PTab::new();
-/// assert_eq!(table.capacity(), 1024);
+/// let table: PTab<String, ConstParams<500>> = PTab::new();
+/// assert_eq!(table.capacity(), 512);
 /// ```
 #[derive(Clone, Copy, Debug, Hash, PartialEq, Eq)]
 #[non_exhaustive]
@@ -238,33 +238,13 @@ const _: () = assert!(size_of::<Capacity>() == size_of::<usize>());
 
 impl Capacity {
   /// The minimum supported capacity (2⁴ entries).
-  pub const MIN: Self = Self(CapacityEnum::_Capacity1Shl4);
+  pub const MIN: Self = Self(CapacityEnum::MIN);
 
   /// The maximum supported capacity (2²⁷ entries).
-  pub const MAX: Self = {
-    #[cfg(not(any(miri, all(test, not(feature = "slow")))))]
-    {
-      Self(CapacityEnum::_Capacity1Shl27)
-    }
-
-    #[cfg(any(miri, all(test, not(feature = "slow"))))]
-    {
-      Self(CapacityEnum::_Capacity1Shl16)
-    }
-  };
+  pub const MAX: Self = Self(CapacityEnum::MAX);
 
   /// The default capacity (2²⁰ entries).
-  pub const DEF: Self = {
-    #[cfg(not(any(miri, all(test, not(feature = "slow")))))]
-    {
-      Self(CapacityEnum::_Capacity1Shl20)
-    }
-
-    #[cfg(any(miri, all(test, not(feature = "slow"))))]
-    {
-      Self(CapacityEnum::_Capacity1Shl10)
-    }
-  };
+  pub const DEF: Self = Self(CapacityEnum::DEF);
 
   /// Creates a `Capacity` from a `usize`.
   ///
@@ -421,6 +401,28 @@ enum CapacityEnum {
   _Capacity1Shl25 = 1 << 25,
   _Capacity1Shl26 = 1 << 26,
   _Capacity1Shl27 = 1 << 27,
+}
+
+impl CapacityEnum {
+  const MIN: Self = Self::_Capacity1Shl4;
+
+  #[cfg(miri)]
+  const MAX: Self = Self::_Capacity1Shl10;
+
+  #[cfg(all(not(miri), test, not(feature = "slow")))]
+  const MAX: Self = Self::_Capacity1Shl16;
+
+  #[cfg(not(any(miri, all(test, not(feature = "slow")))))]
+  const MAX: Self = Self::_Capacity1Shl27;
+
+  #[cfg(miri)]
+  const DEF: Self = Self::_Capacity1Shl5;
+
+  #[cfg(all(not(miri), test, not(feature = "slow")))]
+  const DEF: Self = Self::_Capacity1Shl10;
+
+  #[cfg(not(any(miri, all(test, not(feature = "slow")))))]
+  const DEF: Self = Self::_Capacity1Shl20;
 }
 
 // -----------------------------------------------------------------------------
