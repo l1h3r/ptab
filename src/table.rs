@@ -1,24 +1,12 @@
-//! Core table implementation.
-//!
-//! Uses lock-free operations with epoch-based reclamation via [`sdd`].
-//!
-//! [`sdd`]: https://docs.rs/sdd
-
 use core::fmt::Debug;
 use core::fmt::DebugMap;
 use core::fmt::Formatter;
-use core::fmt::Result;
-use core::hint;
+use core::fmt::Result as FmtResult;
 use core::marker::PhantomData;
-use core::mem;
 use core::mem::MaybeUninit;
+use core::panic::RefUnwindSafe;
+use core::panic::UnwindSafe;
 use core::ptr::NonNull;
-
-use sdd::AtomicOwned;
-use sdd::Guard;
-use sdd::Owned;
-use sdd::Ptr;
-use sdd::Tag;
 
 use crate::array::Array;
 use crate::index::Abstract;
@@ -29,9 +17,11 @@ use crate::params::CACHE_LINE_SLOTS;
 use crate::params::Capacity;
 use crate::params::Params;
 use crate::params::ParamsExt;
+use crate::reclaim::sdd::Atomic;
+use crate::reclaim::sdd::Guard;
+use crate::reclaim::sdd::Shared;
 use crate::sync::atomic::AtomicU32;
 use crate::sync::atomic::AtomicUsize;
-use crate::sync::atomic::Ordering;
 use crate::sync::atomic::Ordering::AcqRel;
 use crate::sync::atomic::Ordering::Acquire;
 use crate::sync::atomic::Ordering::Relaxed;
@@ -39,33 +29,6 @@ use crate::sync::atomic::Ordering::Release;
 
 /// Marker indicating a slot is reserved for an in-progress allocation.
 const RESERVED: usize = usize::MAX;
-
-#[inline]
-fn store<F, T>(atomic: &AtomicOwned<T>, init: F, index: Detached)
-where
-  T: 'static,
-  F: FnOnce(&mut MaybeUninit<T>, Detached),
-{
-  let new: Owned<T> = Owned::new_with(|| {
-    let mut uninit: MaybeUninit<T> = MaybeUninit::uninit();
-
-    init(&mut uninit, index);
-
-    // SAFETY: Caller contract requires `init` to fully initialize `uninit`.
-    unsafe { uninit.assume_init() }
-  });
-
-  let prv: (Option<Owned<T>>, Tag) = atomic.swap((Some(new), Tag::None), Release);
-
-  debug_assert!(prv.0.is_none(), "AtomicOwned<T> is occupied!");
-  debug_assert!(prv.1 == Tag::None, "AtomicOwned<T> is tagged!");
-
-  // SAFETY: Slot allocation logic ensures the slot is empty before `store`.
-  unsafe {
-    hint::assert_unchecked(prv.0.is_none());
-    hint::assert_unchecked(prv.1 == Tag::None);
-  }
-}
 
 // -----------------------------------------------------------------------------
 // Table State
@@ -94,12 +57,31 @@ where
 
   #[inline]
   pub(crate) const fn cap(&self) -> usize {
-    P::LENGTH.as_usize()
+    // See `Volatile::new`
+    if P::LENGTH.as_usize() == Capacity::MAX.as_usize() {
+      P::LENGTH.as_usize().wrapping_sub(1)
+    } else {
+      P::LENGTH.as_usize()
+    }
   }
 
   #[inline]
   pub(crate) fn len(&self) -> u32 {
-    self.volatile.entries.load(Relaxed)
+    let mut len: u32 = self.volatile.load_entries();
+    let mut max: u32 = P::LENGTH.as_u32();
+
+    // See `Volatile::new`
+    if max == Capacity::MAX.as_u32() {
+      len = len.wrapping_sub(1);
+      max = max.wrapping_sub(1);
+    }
+
+    // We may see an invalid `len` from a concurrent insert attempt; fix it here
+    if len > max {
+      return max;
+    }
+
+    len
   }
 
   #[inline]
@@ -128,7 +110,11 @@ where
     let concrete_idx: Concrete<P> = Concrete::from_abstract(abstract_idx);
     let detached_idx: Detached = Detached::from_abstract(abstract_idx);
 
-    store(self.readonly.data.get(concrete_idx), init, detached_idx);
+    self
+      .readonly
+      .data
+      .get(concrete_idx)
+      .write(Release, |maybe| init(maybe, detached_idx));
 
     Some(detached_idx)
   }
@@ -136,18 +122,14 @@ where
   #[inline]
   pub(crate) fn remove(&self, key: Detached) -> bool {
     let index: Concrete<P> = Concrete::from_detached(key);
-    let entry: &AtomicOwned<T> = self.readonly.data.get(index);
-    let value: Option<Owned<T>> = entry.swap((None, Tag::None), AcqRel).0;
+    let entry: &Atomic<T> = self.readonly.data.get(index);
 
-    if value.is_none() {
-      return false;
+    if entry.evict(AcqRel) {
+      self.release_slot(Abstract::from_detached(key));
+      true
+    } else {
+      false
     }
-
-    self.release_slot(key);
-
-    self.volatile.entries.fetch_sub(1, Release);
-
-    true
   }
 
   #[inline]
@@ -155,13 +137,7 @@ where
   where
     F: Fn(&T) -> R,
   {
-    let value: Ptr<'_, T> = self.find(key, guard);
-
-    // SAFETY: Tag bits are never set on data pointers.
-    match unsafe { value.as_ref_unchecked() } {
-      Some(data) => Some(f(data)),
-      None => None,
-    }
+    self.find(key, guard).as_ref().map(f)
   }
 
   #[inline]
@@ -178,43 +154,32 @@ where
   }
 
   #[inline]
-  pub(crate) fn weak_keys(&self) -> WeakKeys<'_, T, P> {
-    WeakKeys::new(self)
+  pub(crate) fn weak_keys(&self, guard: Guard) -> WeakKeys<'_, T, P> {
+    WeakKeys::new(guard, self)
   }
 
   #[inline]
-  fn find<'guard>(&self, key: Detached, guard: &'guard Guard) -> Ptr<'guard, T> {
+  fn find<'guard>(&self, key: Detached, guard: &'guard Guard) -> Shared<'guard, T> {
     self.load(Concrete::from_detached(key), guard)
   }
 
   #[inline]
-  fn load<'guard>(&self, index: Concrete<P>, guard: &'guard Guard) -> Ptr<'guard, T> {
+  fn load<'guard>(&self, index: Concrete<P>, guard: &'guard Guard) -> Shared<'guard, T> {
     self.readonly.data.get(index).load(Acquire, guard)
   }
 
   #[inline]
   fn reserve_slot(&self) -> Option<Permit<'_, T, P>> {
-    let prev: u32 = self.volatile.entries.fetch_add(1, Relaxed);
+    let prev: u32 = self.volatile.incr_entries();
 
-    if prev < self.cap() as u32 {
+    if prev < P::LENGTH.as_u32() {
       return Some(Permit::new(self));
     }
 
     // Table is full; undo the increment.
-    self.restore_slot(prev)
-  }
+    let mut current: u32 = prev.wrapping_add(1);
 
-  #[cold]
-  #[inline(never)]
-  fn restore_slot(&self, prev: u32) -> Option<Permit<'_, T, P>> {
-    let mut current: u32 = prev + 1;
-
-    while let Err(next) =
-      self
-        .volatile
-        .entries
-        .compare_exchange_weak(current, current - 1, Relaxed, Relaxed)
-    {
+    while let Err(next) = self.volatile.swap_entries(current, current.wrapping_sub(1)) {
       current = next;
     }
 
@@ -224,20 +189,22 @@ where
   #[inline]
   fn acquire_slot(&self, _permit: Permit<'_, T, P>) -> Abstract<P> {
     loop {
-      let result: usize = self
-        .readonly
-        .slot
-        .get(Concrete::from_abstract(self.volatile.fetch_next_id()))
-        .swap(RESERVED, Relaxed);
+      let abstract_idx: Abstract<P> = self.volatile.fetch_next_id();
+      let concrete_idx: Concrete<P> = Concrete::from_abstract(abstract_idx);
 
-      if result != RESERVED {
-        return Abstract::new(result);
+      let atomic: &AtomicUsize = self.readonly.slot.get(concrete_idx);
+      let result: usize = atomic.swap(RESERVED, Relaxed);
+
+      if result == RESERVED {
+        continue;
       }
+
+      break Abstract::new(result);
     }
   }
 
   #[inline]
-  fn release_slot(&self, index: Detached) {
+  fn release_slot(&self, index: Abstract<P>) {
     let data: usize = self.generate_next_slot(index);
 
     while self
@@ -247,57 +214,21 @@ where
       .compare_exchange_weak(RESERVED, data, Relaxed, Relaxed)
       .is_err()
     {}
+
+    self.volatile.decr_entries();
   }
 
-  /// Computes the next abstract index for a slot being released.
-  ///
-  /// Adding capacity advances the generation, ensuring the same concrete slot
-  /// produces a different abstract index on reuse (mitigating ABA problems).
   #[inline]
-  const fn generate_next_slot(&self, index: Detached) -> usize {
-    let mut data: usize = Abstract::<P>::from_detached(index).get();
+  const fn generate_next_slot(&self, index: Abstract<P>) -> usize {
+    let mut data: usize = index.get();
 
-    data = data.wrapping_add(self.cap());
+    data = data.wrapping_add(P::LENGTH.as_usize());
 
-    // Avoid the reserved marker value.
     if data == RESERVED {
-      data = data.wrapping_add(self.cap());
+      data = data.wrapping_add(P::LENGTH.as_usize());
     }
 
     data
-  }
-
-  #[cold]
-  #[inline(never)]
-  fn drop_slow(&mut self) {
-    let count: u32 = self.len();
-
-    if count == 0 {
-      return;
-    }
-
-    let mut count: u32 = count;
-
-    for entry in self.readonly.data.as_mut_slice() {
-      #[cfg(not(loom))]
-      let item: AtomicOwned<T> = mem::replace(entry, const { AtomicOwned::null() });
-
-      #[cfg(loom)]
-      let item: AtomicOwned<T> = mem::replace(entry, AtomicOwned::null());
-
-      if let Some(value) = item.into_owned(Ordering::Relaxed) {
-        // SAFETY: `Drop` provides exclusive access; no concurrent readers.
-        unsafe {
-          value.drop_in_place();
-        }
-
-        count -= 1;
-      }
-
-      if count == 0 {
-        break;
-      }
-    }
   }
 }
 
@@ -307,27 +238,72 @@ where
 {
   #[inline]
   fn drop(&mut self) {
-    if mem::needs_drop::<T>() {
-      self.drop_slow();
+    let mut count: u32 = self.len();
+
+    if count == 0 {
+      return;
+    }
+
+    for entry in self.readonly.data.as_mut_slice() {
+      // SAFETY:
+      // - `Drop` provides exclusive access via `&mut self`, so no concurrent
+      //   access can occur.
+      // - Each slot is dropped at most once.
+      if unsafe { entry.drop_in_place() } {
+        count = count.wrapping_sub(1);
+
+        if count == 0 {
+          break;
+        }
+      }
     }
   }
 }
+
+// SAFETY:
+// - All internal mutation is performed via atomics.
+// - Memory reclamation is handled through epoch-based reclamation.
+// - Transferring ownership of `Table` between threads is safe provided
+//   `T: Send`, so contained values may be transferred across threads.
+unsafe impl<T, P> Send for Table<T, P>
+where
+  T: Send,
+  P: Params + ?Sized,
+{
+}
+
+// SAFETY:
+// - All shared access is mediated through atomic operations.
+// - Methods only yield shared references tied to a `Guard`.
+// - Values may be accessed from multiple threads provided `T: Send`, which is
+//   sufficient because no `&mut T` is ever exposed.
+unsafe impl<T, P> Sync for Table<T, P>
+where
+  T: Send,
+  P: Params + ?Sized,
+{
+}
+
+// Unconditional because `Table` provides only shared access to `T` via `with`,
+// and epoch-based reclamation handles panic unwind safely.
+impl<T, P> RefUnwindSafe for Table<T, P> where P: Params + ?Sized {}
+impl<T, P> UnwindSafe for Table<T, P> where P: Params + ?Sized {}
 
 impl<T, P> Debug for Table<T, P>
 where
   T: Debug,
   P: Params + ?Sized,
 {
-  fn fmt(&self, f: &mut Formatter<'_>) -> Result {
-    let mut debug: DebugMap<'_, '_> = f.debug_map();
+  fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
     let guard: Guard = Guard::new();
+    let mut debug: DebugMap<'_, '_> = f.debug_map();
 
-    for (index, entry) in self.readonly.data.as_slice().iter().enumerate() {
-      let value: Ptr<'_, T> = entry.load(Acquire, &guard);
+    for index in 0..P::LENGTH.as_usize() {
+      let abstract_idx: Abstract<P> = Abstract::new(index);
+      let concrete_idx: Concrete<P> = Concrete::from_abstract(abstract_idx);
 
-      // SAFETY: Tag bits are never set on data pointers.
-      if let Some(value) = unsafe { value.as_ref_unchecked() } {
-        debug.entry(&index, value);
+      if let Some(value) = self.load(concrete_idx, &guard).as_ref() {
+        debug.entry(&Detached::from_abstract(abstract_idx), value);
       }
     }
 
@@ -339,19 +315,13 @@ where
 // Volatile State
 // -----------------------------------------------------------------------------
 
-/// Mutable table state modified during operations.
-///
-/// Isolated from [`ReadOnly`] via cache padding to avoid false sharing.
 #[repr(C)]
 struct Volatile<P>
 where
   P: Params + ?Sized,
 {
-  /// Current number of allocated entries.
   entries: AtomicU32,
-  /// Counter for the next slot to try during allocation.
   next_id: AtomicU32,
-  /// Counter for the next slot to try during deallocation.
   free_id: AtomicU32,
   phantom: PhantomData<fn(P)>,
 }
@@ -362,14 +332,36 @@ where
 {
   #[inline]
   fn new() -> Self {
-    // At `Capacity::MAX`, one slot is permanently reserved because the table
-    // cannot yield that many unique identifiers.
+    // At `Capacity::MAX`, one slot is permanently reserved because we can't
+    // produce enough unique identifiers.
     Self {
       entries: AtomicU32::new(u32::from(P::LENGTH == Capacity::MAX)),
       next_id: AtomicU32::new(0),
       free_id: AtomicU32::new(0),
       phantom: PhantomData,
     }
+  }
+
+  #[inline]
+  fn load_entries(&self) -> u32 {
+    self.entries.load(Relaxed)
+  }
+
+  #[inline]
+  fn incr_entries(&self) -> u32 {
+    self.entries.fetch_add(1, Acquire)
+  }
+
+  #[inline]
+  fn decr_entries(&self) -> u32 {
+    self.entries.fetch_sub(1, Release)
+  }
+
+  #[inline]
+  fn swap_entries(&self, current: u32, updated: u32) -> Result<u32, u32> {
+    self
+      .entries
+      .compare_exchange_weak(current, updated, Release, Relaxed)
   }
 
   #[inline]
@@ -381,24 +373,32 @@ where
   fn fetch_free_id(&self) -> Abstract<P> {
     Abstract::new(self.free_id.fetch_add(1, Relaxed) as usize)
   }
+
+  #[allow(dead_code, reason = "not used by loom/shuttle tests")]
+  #[cfg(test)]
+  #[inline]
+  fn load_next_id(&self) -> usize {
+    self.next_id.load(Relaxed) as usize
+  }
+
+  #[allow(dead_code, reason = "not used by loom/shuttle tests")]
+  #[cfg(test)]
+  #[inline]
+  fn load_free_id(&self) -> usize {
+    self.free_id.load(Relaxed) as usize
+  }
 }
 
 // -----------------------------------------------------------------------------
 // Read-only State
 // -----------------------------------------------------------------------------
 
-/// Immutable table state initialized once at construction.
-///
-/// Individual slots are modified atomically, but the arrays themselves never
-/// resize. Isolated from [`Volatile`] via cache padding.
 #[repr(C)]
 struct ReadOnly<T, P>
 where
   P: Params + ?Sized,
 {
-  /// Storage for entry data pointers.
-  data: Array<AtomicOwned<T>, P>,
-  /// Slot metadata for free list management.
+  data: Array<Atomic<T>, P>,
   slot: Array<AtomicUsize, P>,
 }
 
@@ -414,25 +414,16 @@ where
     }
   }
 
-  #[cfg(not(loom))]
   #[inline]
-  fn new_data_array() -> Array<AtomicOwned<T>, P> {
-    // SAFETY: All-zeros is a valid null `AtomicOwned<T>`.
-    unsafe { Array::new_zeroed().assume_init() }
-  }
-
-  #[cfg(loom)]
-  #[inline]
-  fn new_data_array() -> Array<AtomicOwned<T>, P> {
+  fn new_data_array() -> Array<Atomic<T>, P> {
     Array::new(|_, slot| {
-      slot.write(AtomicOwned::null());
+      slot.write(Atomic::null());
     })
   }
 
   #[inline]
   fn new_slot_array() -> Array<AtomicUsize, P> {
     Array::new(|offset, item| {
-      // Initialize slots with abstract indices distributed across cache lines.
       let block: usize = offset / CACHE_LINE_SLOTS;
       let index: usize = offset % CACHE_LINE_SLOTS;
       let value: usize = index * P::BLOCKS.get() + block;
@@ -446,9 +437,6 @@ where
 // Permit
 // -----------------------------------------------------------------------------
 
-/// Proof token that capacity has been reserved for an allocation.
-///
-/// Consumed by [`Table::acquire_slot`] to complete the allocation.
 struct Permit<'table, T, P>
 where
   P: Params + ?Sized,
@@ -469,7 +457,7 @@ where
 }
 
 // -----------------------------------------------------------------------------
-// Keys Iterator - Weak Guarantees
+// Keys Iterator - Weak Snapshot
 // -----------------------------------------------------------------------------
 
 /// Iterator over indices in a [`PTab`] with weak snapshot semantics.
@@ -492,10 +480,11 @@ pub struct WeakKeys<'table, T, P>
 where
   P: Params + ?Sized,
 {
-  array: NonNull<AtomicOwned<T>>,
+  array: NonNull<Atomic<T>>,
   guard: Guard,
+  total: usize,
   index: usize,
-  table: PhantomData<&'table ReadOnly<T, P>>,
+  table: PhantomData<&'table Table<T, P>>,
 }
 
 impl<'table, T, P> WeakKeys<'table, T, P>
@@ -503,10 +492,11 @@ where
   P: Params + ?Sized,
 {
   #[inline]
-  pub(crate) fn new(table: &'table Table<T, P>) -> Self {
+  pub(crate) fn new(guard: Guard, table: &'table Table<T, P>) -> Self {
     Self {
-      array: table.readonly.data.as_nonnull(),
-      guard: Guard::new(),
+      array: table.readonly.data.as_non_null(),
+      guard,
+      total: table.cap(),
       index: 0,
       table: PhantomData,
     }
@@ -517,7 +507,7 @@ impl<T, P> Debug for WeakKeys<'_, T, P>
 where
   P: Params + ?Sized,
 {
-  fn fmt(&self, f: &mut Formatter<'_>) -> Result {
+  fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
     f.write_str("WeakKeys(..)")
   }
 }
@@ -530,23 +520,30 @@ where
 
   #[inline]
   fn next(&mut self) -> Option<Self::Item> {
-    let capapcity: usize = P::LENGTH.as_usize();
+    let guard: &Guard = &self.guard;
+    let total: usize = self.total;
+
     let mut index: usize = self.index;
 
-    while index < capapcity {
+    while index < total {
       let abstract_idx: Abstract<P> = Abstract::new(index);
       let concrete_idx: Concrete<P> = Concrete::from_abstract(abstract_idx);
 
       index += 1;
 
-      let ptr: Ptr<'_, T> = {
-        // SAFETY: `Concrete<P>` indices are always less than `P::LENGTH`.
-        let raw: NonNull<AtomicOwned<T>> = unsafe { self.array.add(concrete_idx.get()) };
+      let ptr: Shared<'_, T> = {
+        // SAFETY:
+        // - `Concrete<P>` guarantees `concrete_idx.get() < P::LENGTH`.
+        // - `self.array` points to a contiguous allocation of `P::LENGTH` elements.
+        let raw: NonNull<Atomic<T>> = unsafe { self.array.add(concrete_idx.get()) };
 
-        // SAFETY: Pointer is valid and aligned.
-        let data: &AtomicOwned<T> = unsafe { raw.as_ref() };
+        // SAFETY:
+        // - `raw` was derived from a valid allocation.
+        // - The pointer is properly aligned for `Atomic<T>`.
+        // - The iterator only performs shared access.
+        let data: &Atomic<T> = unsafe { raw.as_ref() };
 
-        data.load(Acquire, &self.guard)
+        data.load(Acquire, guard)
       };
 
       if ptr.is_null() {
@@ -569,84 +566,395 @@ where
 // -----------------------------------------------------------------------------
 
 #[cfg(not(any(loom, shuttle)))]
+#[cfg_attr(coverage_nightly, coverage(off))]
 #[cfg(test)]
 mod tests {
   use std::collections::HashSet;
-  use std::sync::atomic::AtomicU32;
-  use std::sync::atomic::Ordering;
+  use std::sync::Arc;
+  use std::sync::Barrier;
+  use std::thread;
+  use std::thread::JoinHandle;
 
-  use sdd::Guard;
-
+  use crate::array::Array;
+  use crate::index::Abstract;
+  use crate::index::Concrete;
   use crate::index::Detached;
+  use crate::params::CACHE_LINE_SLOTS;
   use crate::params::Capacity;
   use crate::params::ConstParams;
-  use crate::params::DefaultParams;
+  use crate::params::Params;
+  use crate::params::ParamsExt;
+  use crate::reclaim::sdd;
+  use crate::reclaim::sdd::Atomic;
+  use crate::reclaim::sdd::Guard;
+  use crate::sync::atomic::AtomicUsize;
+  use crate::sync::atomic::Ordering;
+  use crate::table;
+  use crate::table::Permit;
+  use crate::table::RESERVED;
   use crate::table::Table;
 
-  #[cfg(not(miri))]
-  #[test]
-  fn new() {
-    let table: Table<usize, ConstParams<{ Capacity::DEF.as_usize() }>> = Table::new();
+  type DefParams = ConstParams<{ Capacity::DEF.as_usize() }>;
+  type MaxParams = ConstParams<{ Capacity::MAX.as_usize() }>;
+  type MinParams = ConstParams<{ Capacity::MIN.as_usize() }>;
 
+  type ReadOnly<P = DefParams> = table::ReadOnly<u64, P>;
+
+  const THREADS: usize = 8;
+
+  macro_rules! refute {
+    ($cond:expr $(,)?) => {
+      ::core::assert!(!$cond);
+    };
+  }
+
+  macro_rules! make_drop {
+    ($name:ident) => {
+      static COUNT: ::core::sync::atomic::AtomicU32 = ::core::sync::atomic::AtomicU32::new(0);
+
+      struct $name;
+
+      impl $name {
+        #[allow(dead_code, reason = "not used by all tests")]
+        fn new() -> Self {
+          COUNT.fetch_add(1, ::core::sync::atomic::Ordering::Relaxed);
+          Self
+        }
+
+        fn load() -> u32 {
+          COUNT.load(::core::sync::atomic::Ordering::Relaxed)
+        }
+      }
+
+      impl Drop for $name {
+        fn drop(&mut self) {
+          COUNT.fetch_sub(1, ::core::sync::atomic::Ordering::Relaxed);
+        }
+      }
+    };
+  }
+
+  // ---------------------------------------------------------------------------
+  // Internals
+  // ---------------------------------------------------------------------------
+
+  #[test]
+  fn new_data_array() {
+    let array: Array<Atomic<u64>, DefParams> = ReadOnly::new_data_array();
+    let slice: &[Atomic<u64>] = array.as_slice();
+    let guard: Guard = Guard::new();
+
+    for atomic in slice {
+      assert!(atomic.load(Ordering::Relaxed, &guard).is_null());
+    }
+  }
+
+  #[test]
+  fn new_slot_array() {
+    let array: Array<AtomicUsize, DefParams> = ReadOnly::new_slot_array();
+    let slice: &[AtomicUsize] = array.as_slice();
+
+    let mut offset: usize = 0;
+
+    for block in 0..DefParams::BLOCKS.get() {
+      for slot in 0..CACHE_LINE_SLOTS {
+        let expected: usize = slot * DefParams::BLOCKS.get() + block;
+        let received: usize = slice[offset].load(Ordering::Relaxed);
+        assert_eq!(received, expected);
+        offset += 1;
+      }
+    }
+  }
+
+  #[test]
+  fn reserve_slot() {
+    let table: Table<usize, DefParams> = Table::new();
+
+    for _ in 0..table.cap() {
+      assert!(table.reserve_slot().is_some());
+    }
+
+    assert_eq!(table.len(), table.cap() as u32);
+    assert!(table.reserve_slot().is_none());
+    assert_eq!(table.len(), table.cap() as u32);
+  }
+
+  // Scenario: The table fills up and multiple threads race to claim slots.
+  // Expected: We never hand out `Permit`s beyond the available capacity.
+  #[test]
+  fn reserve_slot_race() {
+    static PERMITS: AtomicUsize = AtomicUsize::new(0);
+
+    let table: Arc<Table<usize, DefParams>> = Arc::new(Table::new());
+    let barrier: Arc<Barrier> = Arc::new(Barrier::new(THREADS + 1));
+
+    let mut threads: Vec<JoinHandle<()>> = Vec::with_capacity(THREADS);
+
+    for _ in 0..THREADS {
+      let barrier: Arc<Barrier> = Arc::clone(&barrier);
+      let table: Arc<Table<usize, DefParams>> = Arc::clone(&table);
+
+      threads.push(thread::spawn(move || {
+        barrier.wait();
+
+        for _ in 0..table.cap() {
+          if let Some(_permit) = table.reserve_slot() {
+            PERMITS.fetch_add(1, Ordering::Relaxed);
+          }
+
+          thread::yield_now();
+        }
+      }));
+    }
+
+    barrier.wait();
+
+    for thread in threads {
+      thread.join().unwrap();
+    }
+
+    assert_eq!(table.len(), table.cap() as u32);
+    assert_eq!(table.cap(), PERMITS.load(Ordering::Relaxed));
+  }
+
+  #[test]
+  fn acquire_slot() {
+    let table: Table<usize, DefParams> = Table::new();
+    let mut indices: HashSet<usize> = HashSet::with_capacity(table.cap());
+
+    for _ in 0..table.cap() {
+      let reserved: Permit<'_, usize, DefParams> = table.reserve_slot().unwrap();
+      let acquired: Abstract<DefParams> = table.acquire_slot(reserved);
+
+      assert!(indices.insert(acquired.get()));
+    }
+
+    assert_eq!(table.len(), indices.len() as u32);
+    assert_eq!(table.cap(), table.volatile.load_next_id());
+  }
+
+  #[test]
+  fn release_slot() {
+    let table: Table<usize, DefParams> = Table::new();
+
+    for _ in 0..table.cap() {
+      let reserved: Permit<'_, usize, DefParams> = table.reserve_slot().unwrap();
+      let acquired: Abstract<DefParams> = table.acquire_slot(reserved);
+
+      table.release_slot(acquired);
+    }
+
+    assert!(table.is_empty());
+    assert!(table.volatile.load_free_id().is_multiple_of(table.cap()));
+  }
+
+  #[test]
+  fn generate_next_slot() {
+    let table: Table<usize, DefParams> = Table::new();
+
+    for index in 0..table.cap() {
+      let old: Abstract<DefParams> = Abstract::new(index);
+      let new: Abstract<DefParams> = Abstract::new(table.generate_next_slot(old));
+
+      assert_ne!(old, new);
+    }
+  }
+
+  #[test]
+  fn generate_next_slot_uniqueness() {
+    const GENERATIONS: usize = 10;
+
+    let table: Table<usize, DefParams> = Table::new();
+    let mut indices: HashSet<usize> = HashSet::with_capacity(table.cap());
+    let mut uniques: HashSet<Detached> = HashSet::with_capacity(GENERATIONS * table.cap());
+
+    for generation in 0..GENERATIONS {
+      let gen_index: usize = generation * table.cap();
+
+      for index in 0..table.cap() {
+        let old: Abstract<DefParams> = Abstract::new(gen_index + index);
+        let new: Abstract<DefParams> = Abstract::new(table.generate_next_slot(old));
+        let _in: bool = indices.insert(Concrete::from_abstract(new).get());
+
+        assert!(uniques.insert(Detached::from_abstract(new)));
+      }
+    }
+
+    assert_eq!(uniques.len(), GENERATIONS * table.cap());
+    assert_eq!(indices.len(), table.cap());
+  }
+
+  #[test]
+  fn generate_next_slot_skips_reserved() {
+    let table: Table<usize, DefParams> = Table::new();
+    let index: Abstract<DefParams> = Abstract::new(RESERVED - table.cap());
+    let value: usize = table.generate_next_slot(index);
+
+    assert_ne!(value, RESERVED);
+  }
+
+  // Scenario: The table fills up as multiple threads manipulate slots.
+  // Expected:
+  // - We never hand out `Permit`s beyond the available capacity.
+  // - Every `Permit` is honored in `acquire_slot`.
+  // - All keys are unique.
+  // - The table count stays in bounds.
+  #[test]
+  fn slot_churn() {
+    static PERMITS: AtomicUsize = AtomicUsize::new(0);
+    static UNIQUES: AtomicUsize = AtomicUsize::new(0);
+
+    let table: Arc<Table<usize, DefParams>> = Arc::new(Table::new());
+    let barrier: Arc<Barrier> = Arc::new(Barrier::new(THREADS + 1));
+    let capacity: usize = table.cap();
+
+    let mut threads: Vec<JoinHandle<Vec<usize>>> = Vec::with_capacity(THREADS);
+    let mut uniques: HashSet<usize> = HashSet::with_capacity(capacity);
+
+    for _ in 0..THREADS {
+      let barrier: Arc<Barrier> = Arc::clone(&barrier);
+      let table: Arc<Table<usize, DefParams>> = Arc::clone(&table);
+
+      threads.push(thread::spawn(move || {
+        let mut track: Vec<usize> = Vec::with_capacity(capacity);
+        let mut index: usize = 0;
+
+        barrier.wait();
+
+        for _ in 0..4 {
+          for _ in 0..capacity {
+            if let Some(permit) = table.reserve_slot() {
+              track.push(table.acquire_slot(permit).get());
+              index += 1;
+
+              assert!(table.len() <= capacity as u32);
+              assert!(PERMITS.fetch_add(1, Ordering::Relaxed) <= capacity);
+
+              UNIQUES.fetch_add(1, Ordering::Relaxed);
+            }
+
+            if index.is_multiple_of(2)
+              && let Some(index) = track[index..].first()
+            {
+              table.release_slot(Abstract::new(*index));
+              PERMITS.fetch_sub(1, Ordering::Relaxed);
+            }
+
+            thread::yield_now();
+          }
+        }
+
+        track
+      }));
+    }
+
+    barrier.wait();
+
+    for thread in threads {
+      for key in thread.join().unwrap() {
+        assert!(uniques.insert(key));
+      }
+    }
+
+    assert_eq!(uniques.len(), UNIQUES.load(Ordering::Relaxed));
+    assert_eq!(table.cap(), PERMITS.load(Ordering::Relaxed));
+  }
+
+  // ---------------------------------------------------------------------------
+  // API
+  // ---------------------------------------------------------------------------
+
+  #[test]
+  fn cap() {
+    let table: Table<usize, DefParams> = Table::new();
     assert_eq!(table.cap(), Capacity::DEF.as_usize());
+
+    let table: Table<usize, MaxParams> = Table::new();
+    assert_eq!(table.cap(), Capacity::MAX.as_usize() - 1);
+
+    let table: Table<usize, MinParams> = Table::new();
+    assert_eq!(table.cap(), Capacity::MIN.as_usize());
+  }
+
+  #[test]
+  fn len() {
+    let table: Table<usize, DefParams> = Table::new();
     assert_eq!(table.len(), 0);
+
+    let table: Table<usize, MaxParams> = Table::new();
+    assert_eq!(table.len(), 0);
+
+    let table: Table<usize, MinParams> = Table::new();
+    assert_eq!(table.len(), 0);
+  }
+
+  // Scenario: The table is temporarily above capacity due to concurrent writes.
+  // Expected: The `len` never surpasses `cap`.
+  #[test]
+  fn len_clamp() {
+    let table: Table<usize, DefParams> = Table::new();
+
+    table
+      .volatile
+      .entries
+      .store(DefParams::LENGTH.as_u32() + 1, Ordering::Relaxed);
+
+    assert_eq!(table.len(), table.cap() as u32);
+  }
+
+  #[test]
+  fn is_empty() {
+    let table: Table<usize, DefParams> = Table::new();
+    assert!(table.is_empty());
+
+    let table: Table<usize, MaxParams> = Table::new();
+    assert!(table.is_empty());
+
+    let table: Table<usize, MinParams> = Table::new();
     assert!(table.is_empty());
   }
 
   #[test]
-  fn insert_single() {
-    let table: Table<usize, DefaultParams> = Table::new();
-    let guard: Guard = Guard::new();
-    let index: Detached = table.insert(123).unwrap();
+  fn insert() {
+    let table: Table<usize, DefParams> = Table::new();
 
+    assert_ne!(table.insert(123), None);
     assert_eq!(table.len(), 1);
-    assert!(!table.is_empty());
-    assert!(table.exists(index, &guard));
-    assert_eq!(table.read(index, &guard), Some(123));
+
+    for index in 0..16 {
+      assert_ne!(table.insert(123), None);
+      assert_eq!(table.len(), index + 2);
+    }
+
+    assert_eq!(table.len(), 17);
   }
 
   #[test]
-  fn insert_multiple() {
-    let table: Table<usize, DefaultParams> = Table::new();
-    let guard: Guard = Guard::new();
-    let mut keys: Vec<Detached> = Vec::with_capacity(16);
+  fn insert_beyond_capacity() {
+    let table: Table<usize, DefParams> = Table::new();
 
-    for index in 0..16 {
-      keys.push(table.insert(index * 100).unwrap());
+    for _ in 0..table.cap() {
+      assert_ne!(table.insert(123), None);
     }
 
-    assert_eq!(table.len(), 16);
-
-    for (index, key) in keys.iter().enumerate() {
-      assert_eq!(table.read(*key, &guard), Some(index * 100));
-    }
+    assert_eq!(table.len(), table.cap() as u32);
+    assert_eq!(table.insert(123), None);
+    assert_eq!(table.len(), table.cap() as u32);
   }
 
   #[test]
   fn insert_unique_ids() {
-    let table: Table<usize, DefaultParams> = Table::new();
-    let mut keys: HashSet<Detached> = HashSet::new();
+    let table: Table<usize, DefParams> = Table::new();
+    let mut keys: HashSet<Detached> = HashSet::with_capacity(table.cap());
 
     for _ in 0..table.cap() {
-      assert!(keys.insert(table.insert(0).unwrap()));
+      assert!(keys.insert(table.insert(123).unwrap()));
     }
   }
 
   #[test]
-  fn insert_maximum() {
-    let table: Table<usize, DefaultParams> = Table::new();
-
-    for index in 0..table.cap() {
-      assert!(table.insert(index).is_some());
-    }
-
-    assert_eq!(table.len(), table.cap() as u32);
-    assert_eq!(table.insert(9999), None);
-  }
-
-  #[test]
-  fn write_callback_receives_correct_index() {
-    let table: Table<usize, DefaultParams> = Table::new();
+  fn write_callback_correct_index() {
+    let table: Table<usize, DefParams> = Table::new();
     let guard: Guard = Guard::new();
 
     let index: Detached = table
@@ -659,78 +967,76 @@ mod tests {
   }
 
   #[test]
-  fn remove_existing() {
-    let table: Table<usize, DefaultParams> = Table::new();
-    let guard: Guard = Guard::new();
+  fn remove() {
+    let table: Table<usize, DefParams> = Table::new();
     let index: Detached = table.insert(123).unwrap();
 
     assert_eq!(table.len(), 1);
     assert!(!table.is_empty());
-    assert!(table.exists(index, &guard));
+
     assert!(table.remove(index));
 
     assert_eq!(table.len(), 0);
     assert!(table.is_empty());
-    assert!(!table.exists(index, &guard));
   }
 
   #[test]
   fn remove_nonexistent() {
-    let table: Table<usize, DefaultParams> = Table::new();
+    let table: Table<usize, DefParams> = Table::new();
     let index: Detached = table.insert(123).unwrap();
 
     assert!(table.remove(index));
-    assert!(!table.remove(index));
-  }
-
-  #[test]
-  fn remove_isolation() {
-    let table: Table<usize, DefaultParams> = Table::new();
-    let guard: Guard = Guard::new();
-    let mut keys: Vec<Detached> = Vec::with_capacity(16);
-
-    for index in 0..16 {
-      keys.push(table.insert(index).unwrap());
-    }
-
-    for index in (0..16).step_by(2) {
-      table.remove(keys[index]);
-    }
-
-    assert_eq!(table.len(), 8);
-
-    for index in (1..16).step_by(2) {
-      assert_eq!(table.read(keys[index], &guard), Some(index));
-    }
-
-    for index in (0..16).step_by(2) {
-      assert!(!table.exists(keys[index], &guard));
-    }
+    refute!(table.remove(index));
   }
 
   #[test]
   fn remove_recycling() {
-    let table: Table<usize, DefaultParams> = Table::new();
+    let table: Table<usize, DefParams> = Table::new();
     let guard: Guard = Guard::new();
-    let mut keys: Vec<Detached> = Vec::with_capacity(table.cap() - 1);
+    let mut keys: Vec<Detached> = Vec::with_capacity(table.cap());
 
     for index in 0..table.cap() {
       keys.push(table.insert(index).unwrap());
     }
 
-    assert_eq!(table.insert(99), None);
+    assert!(table.insert(123).is_none());
+    assert!(table.remove(keys[0]));
 
-    table.remove(keys[0]);
-
-    let index: Detached = table.insert(100).unwrap();
+    let index: Detached = table.insert(456).unwrap();
 
     assert!(table.exists(index, &guard));
-    assert_eq!(table.read(index, &guard), Some(100));
+    assert_eq!(table.read(index, &guard), Some(456));
+
+    for key in keys.drain(1..).rev() {
+      assert!(table.remove(key));
+    }
+
+    for index in 0..table.cap() - 1 {
+      assert!(table.insert(index).is_some());
+    }
   }
 
   #[test]
-  fn exists_existing() {
-    let table: Table<usize, DefaultParams> = Table::new();
+  fn with() {
+    let table: Table<usize, DefParams> = Table::new();
+    let guard: Guard = Guard::new();
+    let index: Detached = table.insert(123).unwrap();
+
+    assert_eq!(table.with(index, &guard, |item| item + 1), Some(124));
+  }
+
+  #[test]
+  fn with_nonexistent() {
+    let table: Table<usize, DefParams> = Table::new();
+    let guard: Guard = Guard::new();
+    let index: Detached = Detached::from_bits(123);
+
+    assert_eq!(table.with(index, &guard, |item| item + 1), None);
+  }
+
+  #[test]
+  fn exists() {
+    let table: Table<usize, DefParams> = Table::new();
     let guard: Guard = Guard::new();
     let index: Detached = table.insert(123).unwrap();
 
@@ -739,285 +1045,146 @@ mod tests {
 
   #[test]
   fn exists_nonexistent() {
-    let table: Table<usize, DefaultParams> = Table::new();
+    let table: Table<usize, DefParams> = Table::new();
+    let guard: Guard = Guard::new();
+    let index: Detached = Detached::from_bits(123);
+
+    refute!(table.exists(index, &guard));
+  }
+
+  #[test]
+  fn read() {
+    let table: Table<usize, DefParams> = Table::new();
     let guard: Guard = Guard::new();
     let index: Detached = table.insert(123).unwrap();
 
-    assert!(table.remove(index));
-    assert!(!table.exists(index, &guard));
+    assert_eq!(table.read(index, &guard), Some(123));
   }
 
   #[test]
-  fn exists_multiple() {
-    let table: Table<usize, DefaultParams> = Table::new();
+  fn read_nonexistent() {
+    let table: Table<usize, DefParams> = Table::new();
     let guard: Guard = Guard::new();
+    let index: Detached = Detached::from_bits(123);
 
-    let index1: Detached = table.insert(1).unwrap();
-    let index2: Detached = table.insert(2).unwrap();
-    let index3: Detached = table.insert(3).unwrap();
-
-    assert!(table.exists(index1, &guard));
-    assert!(table.exists(index2, &guard));
-    assert!(table.exists(index3, &guard));
-
-    table.remove(index2);
-
-    assert!(table.exists(index1, &guard));
-    assert!(!table.exists(index2, &guard));
-    assert!(table.exists(index3, &guard));
-  }
-
-  #[test]
-  fn with_value() {
-    let table: Table<usize, DefaultParams> = Table::new();
-    let guard: Guard = Guard::new();
-    let index: Detached = table.insert(12345).unwrap();
-
-    assert_eq!(table.with(index, &guard, |data| *data), Some(12345));
-  }
-
-  #[test]
-  fn with_return_value() {
-    let table: Table<usize, DefaultParams> = Table::new();
-    let guard: Guard = Guard::new();
-    let index: Detached = table.insert(123).unwrap();
-
-    assert_eq!(table.with(index, &guard, |data| data + 1), Some(124));
-  }
-
-  #[test]
-  fn with_nonexistent() {
-    let table: Table<usize, DefaultParams> = Table::new();
-    let guard: Guard = Guard::new();
-    let index: Detached = table.insert(123).unwrap();
-
-    assert!(table.remove(index));
-    assert_eq!(table.with(index, &guard, |data| *data), None);
-  }
-
-  #[test]
-  fn with_multiple() {
-    let table: Table<usize, DefaultParams> = Table::new();
-    let guard: Guard = Guard::new();
-    let index: Detached = table.insert(123).unwrap();
-
-    for _ in 0..100 {
-      assert_eq!(table.with(index, &guard, |data| *data), Some(123));
-    }
-  }
-
-  #[test]
-  fn len_tracks_insertions() {
-    let table: Table<usize, DefaultParams> = Table::new();
-
-    for index in 0..16 {
-      assert!(table.insert(0).is_some());
-      assert_eq!(table.len(), index + 1);
-    }
-  }
-
-  #[test]
-  fn len_tracks_removals() {
-    let table: Table<usize, DefaultParams> = Table::new();
-    let mut keys: Vec<Detached> = Vec::with_capacity(16);
-
-    for _ in 0..16 {
-      keys.push(table.insert(0).unwrap());
-    }
-
-    for (index, key) in keys.iter().enumerate() {
-      assert!(table.remove(*key));
-      assert_eq!(table.len() as usize, 16 - index - 1);
-    }
-  }
-
-  #[test]
-  fn is_empty() {
-    let table: Table<usize, DefaultParams> = Table::new();
-
-    assert!(table.is_empty());
-
-    let index: Detached = table.insert(0).unwrap();
-
-    assert!(!table.is_empty());
-    assert!(table.remove(index));
-    assert!(table.is_empty());
-  }
-
-  #[test]
-  fn interleaved_insert_remove() {
-    let table: Table<usize, DefaultParams> = Table::new();
-    let guard: Guard = Guard::new();
-    let mut keys: Vec<Detached> = Vec::with_capacity(16);
-
-    for index in 0..8 {
-      keys.push(table.insert(index).unwrap());
-    }
-    assert_eq!(table.len(), 8);
-
-    for _ in 0..4 {
-      table.remove(keys.pop().unwrap());
-    }
-    assert_eq!(table.len(), 4);
-
-    for index in 100..108 {
-      keys.push(table.insert(index).unwrap());
-    }
-    assert_eq!(table.len(), 12);
-
-    for key in keys {
-      assert!(table.exists(key, &guard));
-    }
-  }
-
-  #[test]
-  fn multiple_refills() {
-    let table: Table<usize, DefaultParams> = Table::new();
-    let guard: Guard = Guard::new();
-
-    for round in 0..3 {
-      let mut keys: Vec<Detached> = Vec::new();
-
-      for index in 0..16 {
-        keys.push(table.insert(round * 100 + index).unwrap());
-      }
-      assert_eq!(table.len(), 16);
-
-      for (index, key) in keys.iter().enumerate() {
-        assert_eq!(table.read(*key, &guard), Some(round * 100 + index));
-      }
-
-      for key in keys {
-        table.remove(key);
-      }
-      assert_eq!(table.len(), 0);
-    }
-  }
-
-  #[test]
-  fn uniqueness_across_multiple_generations() {
-    const GENS: usize = 10;
-
-    let table: Table<usize, DefaultParams> = Table::new();
-    let mut key_set: HashSet<usize> = HashSet::with_capacity(GENS * 16);
-
-    for _ in 0..GENS {
-      let mut key_arr: Vec<Detached> = Vec::with_capacity(16);
-
-      for _ in 0..16 {
-        let index: Detached = table.insert(0).unwrap();
-
-        key_arr.push(index);
-
-        assert!(key_set.insert(index.into_bits()));
-      }
-
-      for key in key_arr {
-        assert!(table.remove(key));
-      }
-    }
-  }
-
-  #[test]
-  fn min_capacity_operations() {
-    type Params = ConstParams<{ Capacity::MIN.as_usize() }>;
-
-    let table: Table<usize, Params> = Table::new();
-    let guard: Guard = Guard::new();
-
-    assert_eq!(table.cap(), Capacity::MIN.as_usize());
-
-    let index: Detached = table.insert(99).unwrap();
-
-    assert!(table.exists(index, &guard));
-    assert_eq!(table.read(index, &guard), Some(99));
-    assert!(table.remove(index));
-    assert!(!table.exists(index, &guard));
-  }
-
-  #[cfg_attr(
-    any(miri, not(feature = "slow")),
-    ignore = "enable the 'slow' feature to run this test."
-  )]
-  #[test]
-  fn max_capacity_operations() {
-    type Params = ConstParams<{ Capacity::MAX.as_usize() }>;
-
-    let table: Table<usize, Params> = Table::new();
-
-    assert_eq!(table.cap(), Capacity::MAX.as_usize());
-    assert_eq!(table.len(), 1); // See `Volatile::new`
-  }
-
-  #[test]
-  fn drop_slow() {
-    static COUNT: AtomicU32 = AtomicU32::new(0);
-
-    struct DropMe;
-
-    impl DropMe {
-      fn new() -> Self {
-        COUNT.fetch_add(1, Ordering::Relaxed);
-        Self
-      }
-    }
-
-    impl Drop for DropMe {
-      fn drop(&mut self) {
-        COUNT.fetch_sub(1, Ordering::Relaxed);
-      }
-    }
-
-    let drop_0: Table<DropMe, DefaultParams> = Table::new();
-
-    assert_eq!(COUNT.load(Ordering::Relaxed), 0);
-    assert_eq!(COUNT.load(Ordering::Relaxed), drop_0.len());
-    drop(drop_0);
-    assert_eq!(COUNT.load(Ordering::Relaxed), 0);
-
-    let drop_1: Table<DropMe, DefaultParams> = {
-      let this = Table::new();
-      this.insert(DropMe::new()).unwrap();
-      this
-    };
-
-    assert_eq!(COUNT.load(Ordering::Relaxed), 1);
-    assert_eq!(COUNT.load(Ordering::Relaxed), drop_1.len());
-    drop(drop_1);
-    assert_eq!(COUNT.load(Ordering::Relaxed), 0);
-
-    let drop_full: Table<DropMe, DefaultParams> = {
-      let this = Table::new();
-
-      for _ in 0..this.cap() {
-        this.insert(DropMe::new()).unwrap();
-      }
-
-      this
-    };
-
-    assert_eq!(COUNT.load(Ordering::Relaxed), drop_full.cap() as u32);
-    assert_eq!(COUNT.load(Ordering::Relaxed), drop_full.len());
-    drop(drop_full);
-    assert_eq!(COUNT.load(Ordering::Relaxed), 0);
+    assert_eq!(table.read(index, &guard), None);
   }
 
   #[test]
   fn weak_keys() {
-    let table: Table<usize, DefaultParams> = Table::new();
-    let mut keys: Vec<Detached> = Vec::with_capacity(16);
+    let table: Table<usize, DefParams> = Table::new();
+    let mut keys: Vec<Detached> = Vec::with_capacity(table.cap());
 
-    for _ in 0..16 {
-      keys.push(table.insert(0).unwrap());
+    assert_eq!(table.weak_keys(Guard::new()).next(), None);
+
+    for index in 0..table.cap() {
+      keys.push(table.insert(index).unwrap());
     }
 
-    let new: Vec<Detached> = table.weak_keys().collect();
+    assert_eq!(table.weak_keys(Guard::new()).count(), table.cap());
 
-    for (init_key, iter_key) in keys.into_iter().zip(new.into_iter()) {
+    for (init_key, iter_key) in keys.into_iter().zip(table.weak_keys(Guard::new())) {
       assert_eq!(init_key, iter_key);
-      assert!(table.remove(init_key));
+    }
+  }
+
+  #[test]
+  fn drop_empty() {
+    make_drop!(DropMe);
+
+    assert_eq!(DropMe::load(), 0);
+    drop(Table::<DropMe, DefParams>::new());
+    assert_eq!(DropMe::load(), 0);
+  }
+
+  #[test]
+  fn drop_half_full() {
+    make_drop!(DropMe);
+
+    let table: Table<DropMe, DefParams> = Table::new();
+    let mut keys: Vec<Detached> = Vec::with_capacity(table.cap() / 2);
+
+    for index in 0..table.cap() {
+      if index & 1 == 0 {
+        keys.push(table.insert(DropMe::new()).unwrap());
+      } else {
+        assert_ne!(table.insert(DropMe::new()), None);
+      }
     }
 
-    assert_eq!(table.weak_keys().next(), None);
+    for key in keys {
+      assert!(table.remove(key));
+    }
+
+    // Force garbage collection - this should always succeed
+    // for our use-case since we are single-threaded
+    sdd::try_reclaim();
+
+    assert_eq!(DropMe::load(), table.cap() as u32 / 2);
+    assert_eq!(DropMe::load(), table.len());
+    drop(table);
+    assert_eq!(DropMe::load(), 0);
+  }
+
+  #[test]
+  fn drop_full() {
+    make_drop!(DropMe);
+
+    let table: Table<DropMe, DefParams> = Table::new();
+
+    for _ in 0..table.cap() {
+      assert_ne!(table.insert(DropMe::new()), None);
+    }
+
+    assert_eq!(DropMe::load(), table.cap() as u32);
+    assert_eq!(DropMe::load(), table.len());
+    drop(table);
+    assert_eq!(DropMe::load(), 0);
+  }
+
+  #[test]
+  fn debug_empty() {
+    let table: Table<u64, DefParams> = Table::new();
+    let value: String = format!("{table:?}");
+
+    assert_eq!(value, "{}");
+  }
+
+  #[test]
+  fn debug_entry_format() {
+    let table: Table<u64, DefParams> = Table::new();
+    let mut keys: Vec<Detached> = Vec::with_capacity(8);
+
+    for index in 0..8 {
+      keys.push(table.insert(index).unwrap());
+    }
+
+    let value: String = format!("{table:?}");
+
+    for (index, key) in keys.into_iter().enumerate() {
+      assert!(value.contains(&format!("{key}: {index}")));
+    }
+  }
+
+  #[test]
+  fn debug_weak_keys() {
+    let table: Table<usize, DefParams> = Table::new();
+    let debug: String = format!("{:?}", table.weak_keys(Guard::new()));
+
+    assert_eq!(debug, "WeakKeys(..)");
+  }
+
+  // Scenario: The table has a single block due to min capacity.
+  // Expected: Entry operations succeed.
+  #[test]
+  fn min_capacity_ops() {
+    let table: Table<usize, MinParams> = Table::new();
+    let guard: Guard = Guard::new();
+    let index: Detached = table.insert(123).unwrap();
+
+    assert!(table.exists(index, &guard));
+    assert_eq!(table.read(index, &guard), Some(123));
+    assert!(table.remove(index));
+    refute!(table.exists(index, &guard));
   }
 }

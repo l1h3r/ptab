@@ -103,7 +103,7 @@ jobs:
       - run: cargo miri setup
       - run: cargo miri test
         env:
-          MIRIFLAGS: -Zmiri-strict-provenance -Zmiri-ignore-leaks
+          MIRIFLAGS: -Zmiri-strict-provenance
 
   clippy:
     name: Clippy

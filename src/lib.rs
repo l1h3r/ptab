@@ -52,8 +52,8 @@
 //! ```
 //! use ptab::{PTab, ConstParams};
 //!
-//! let table: PTab<u64, ConstParams<4096>> = PTab::new();
-//! assert_eq!(table.capacity(), 4096);
+//! let table: PTab<u64, ConstParams<512>> = PTab::new();
+//! assert_eq!(table.capacity(), 512);
 //! ```
 //!
 //! Capacity is always rounded up to the nearest power of two and clamped
@@ -106,17 +106,31 @@
 //! # Capacity Limits
 //!
 //! Capacity is bounded by [`Capacity::MIN`] and [`Capacity::MAX`]. The default
-//! is [`Capacity::DEF`]. When full, [`PTab::insert`] returns [`None`].
+//! is [`Capacity::DEF`]. When full, [`PTab::insert()`] returns [`None`].
+//!
+//! [Capacity::MAX]: crate::config::Capacity::MAX
+//! [Capacity::MIN]: crate::config::Capacity::MIN
+//! [`CACHE_LINE_SLOTS`]: crate::config::CACHE_LINE_SLOTS
+//! [`Capacity::DEF`]: crate::config::Capacity::DEF
+//! [`Capacity::MAX`]: crate::config::Capacity::MAX
+//! [`Capacity::MIN`]: crate::config::Capacity::MIN
+//! [`ConstParams`]: crate::config::ConstParams
+//! [`DefaultParams`]: crate::config::DefaultParams
+//! [`Params`]: crate::config::Params
+//! [`PTab::insert()`]: crate::public::PTab::insert
 //!
 //! [ABA problem]: https://en.wikipedia.org/wiki/ABA_problem
 //! [`sdd`]: https://docs.rs/sdd
 //!
+
+#![cfg_attr(coverage_nightly, feature(coverage_attribute))]
 
 mod array;
 mod index;
 mod padded;
 mod params;
 mod public;
+mod reclaim;
 mod table;
 mod utils;
 
@@ -127,14 +141,31 @@ pub mod implementation {
   #![doc = include_str!("../IMPLEMENTATION.md")]
 }
 
+pub mod config {
+  //! Configuration parameters which can be used to override the default table
+  //! settings.
+
+  pub use crate::params::CACHE_LINE;
+  pub use crate::params::CACHE_LINE_SLOTS;
+  pub use crate::params::Capacity;
+  pub use crate::params::ConstParams;
+  pub use crate::params::DebugParams;
+  pub use crate::params::DefaultParams;
+  pub use crate::params::Params;
+  pub use crate::params::ParamsExt;
+}
+
+#[doc(inline)]
+pub use self::config::Capacity;
+
+#[doc(inline)]
+pub use self::config::ConstParams;
+
+#[doc(inline)]
+pub use self::config::DefaultParams;
+
 pub use self::index::Detached;
-pub use self::params::CACHE_LINE;
-pub use self::params::CACHE_LINE_SLOTS;
-pub use self::params::Capacity;
-pub use self::params::ConstParams;
-pub use self::params::DebugParams;
-pub use self::params::DefaultParams;
-pub use self::params::Params;
-pub use self::params::ParamsExt;
+
+pub use self::public::Guard;
 pub use self::public::PTab;
-pub use self::table::WeakKeys;
+pub use self::public::WeakKeys;

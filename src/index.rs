@@ -1,8 +1,3 @@
-//! Index types and conversions.
-//!
-//! Provides [`Detached`], the public index type, and internal index types for
-//! abstract and concrete slot addressing.
-
 use core::fmt::Debug;
 use core::fmt::Display;
 use core::fmt::Formatter;
@@ -66,6 +61,7 @@ macro_rules! internal_index {
     where
       P: ?Sized,
     {
+      #[inline]
       fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
         ::core::fmt::Debug::fmt(&self.source, f)
       }
@@ -77,7 +73,7 @@ macro_rules! internal_index {
 // Detached Index
 // -----------------------------------------------------------------------------
 
-/// An opaque index identifying an entry in a [`PTab`].
+/// An opaque index identifying a table entry.
 ///
 /// Returned by [`PTab::insert`] and [`PTab::write`]; used to access or remove
 /// entries.
@@ -85,7 +81,7 @@ macro_rules! internal_index {
 /// # Generational Indices
 ///
 /// Each index contains a generational component that changes when a slot is
-/// reused. This mitigates the [ABA problem]: a stale index from a removed
+/// reused. This helps mitigate the [ABA problem]: a stale index from a removed
 /// entry will not match a new entry occupying the same slot.
 ///
 /// # Examples
@@ -120,8 +116,8 @@ impl Detached {
   ///
   /// # Warning
   ///
-  /// An arbitrary bit pattern may not correspond to any valid entry; using it
-  /// is safe but will return [`None`] or `false` from table operations.
+  /// An arbitrary bit pattern may not correspond to a valid table entry; using
+  /// it is safe but will return [`None`] or `false` from table operations.
   #[inline]
   pub const fn from_bits(bits: usize) -> Self {
     Self { bits }
@@ -139,12 +135,14 @@ impl Detached {
 }
 
 impl Debug for Detached {
+  #[inline]
   fn fmt(&self, f: &mut Formatter<'_>) -> Result {
     Debug::fmt(&self.bits, f)
   }
 }
 
 impl Display for Detached {
+  #[inline]
   fn fmt(&self, f: &mut Formatter<'_>) -> Result {
     Display::fmt(&self.bits, f)
   }
@@ -251,6 +249,7 @@ where
 // Tests
 // -----------------------------------------------------------------------------
 
+#[cfg_attr(coverage_nightly, coverage(off))]
 #[cfg(test)]
 mod tests {
   use std::collections::HashSet;
@@ -319,10 +318,14 @@ mod tests {
     assert_eq!(format!("{index}"), format!("{value}"));
   }
 
-  #[cfg_attr(
-    not(feature = "slow"),
-    ignore = "enable the 'slow' feature to run this test."
-  )]
+  #[test]
+  fn detached_bits_roundtrip() {
+    let data: usize = usize::MAX >> 2;
+    let bits: usize = Detached::from_bits(data).into_bits();
+
+    assert_eq!(data, bits);
+  }
+
   #[test]
   fn abstract_to_concrete_covers_all_slots() {
     each_capacity!({
@@ -335,19 +338,12 @@ mod tests {
         used.insert(concrete_idx.get());
       }
 
-      assert_eq!(
-        used.len(),
-        P::LENGTH.as_usize(),
-        "invalid id mapping: abstract fails to cover all concrete slots - {:?}",
-        P::debug(),
-      );
+      assert_eq!(used.len(), P::LENGTH.as_usize());
+      assert_eq!(used.iter().min(), Some(&0));
+      assert_eq!(used.iter().max(), Some(&(P::LENGTH.as_usize() - 1)));
     });
   }
 
-  #[cfg_attr(
-    not(feature = "slow"),
-    ignore = "enable the 'slow' feature to run this test."
-  )]
   #[test]
   fn abstract_to_detached_roundtrip() {
     each_capacity!({
@@ -356,35 +352,22 @@ mod tests {
         let detached_idx: Detached = Detached::from_abstract(abstract_idx);
         let recovery_idx: Abstract<P> = Abstract::from_detached(detached_idx);
 
-        assert_eq!(
-          abstract_idx,
-          recovery_idx,
-          "invalid id mapping: abstract-to-detached conversion not recoverable - {:?}",
-          P::debug(),
-        );
+        assert_eq!(abstract_idx, recovery_idx);
       }
     });
   }
 
-  #[cfg_attr(
-    not(feature = "slow"),
-    ignore = "enable the 'slow' feature to run this test."
-  )]
   #[test]
-  fn detached_to_concrete_matches_direct_conversion() {
+  fn concrete_from_detached_matches_from_abstract() {
     each_capacity!({
       for index in 0..P::LENGTH.as_usize() {
         let abstract_idx: Abstract<P> = Abstract::new(index);
         let detached_idx: Detached = Detached::from_abstract(abstract_idx);
-        let concrete_idx: Concrete<P> = Concrete::from_abstract(abstract_idx);
-        let recovery_idx: Concrete<P> = Concrete::from_detached(detached_idx);
 
-        assert_eq!(
-          concrete_idx,
-          recovery_idx,
-          "invalid id mapping: detached-to-concrete conversion mismatch - {:?}",
-          P::debug(),
-        );
+        let from_abstract: Concrete<P> = Concrete::from_abstract(abstract_idx);
+        let from_detached: Concrete<P> = Concrete::from_detached(detached_idx);
+
+        assert_eq!(from_abstract, from_detached);
       }
     });
   }
@@ -392,34 +375,27 @@ mod tests {
   #[test]
   fn cache_line_distribution() {
     // Verify that consecutive base indices are distributed across cache lines
-    each_capacity!({
+    each_capacity!('block: {
       if P::BLOCKS.get() <= 1 {
-        return; // Skip solo blocks
+        break 'block; // Skip solo blocks
       }
 
       // First `CACHE_LINE_SLOTS` indices should map to different blocks
       let mut blocks: HashSet<usize> = HashSet::with_capacity(CACHE_LINE_SLOTS);
 
-      for index in 0..CACHE_LINE_SLOTS {
+      for index in 0..P::LENGTH.as_usize() {
         let abstract_idx: Abstract<P> = Abstract::new(index);
         let concrete_idx: Concrete<P> = Concrete::from_abstract(abstract_idx);
 
         blocks.insert(concrete_idx.get() / CACHE_LINE_SLOTS);
       }
 
-      assert_eq!(
-        blocks.len(),
-        P::BLOCKS.get(),
-        "invalid id mapping: corrupted cache-line distribution - {:?}",
-        P::debug(),
-      );
+      assert_eq!(blocks.len(), P::BLOCKS.get());
+      assert_eq!(blocks.iter().min(), Some(&0));
+      assert_eq!(blocks.iter().max(), Some(&(P::BLOCKS.get() - 1)));
     });
   }
 
-  #[cfg_attr(
-    not(feature = "slow"),
-    ignore = "enable the 'slow' feature to run this test."
-  )]
   #[test]
   fn serial_number_preservation() {
     each_capacity!({
@@ -431,12 +407,8 @@ mod tests {
           let detached_idx: Detached = Detached::from_abstract(abstract_idx);
           let recovery_idx: Abstract<P> = Abstract::from_detached(detached_idx);
 
-          assert_eq!(
-            abstract_idx,
-            recovery_idx,
-            "invalid id mapping: serial number not preserved - {:?}",
-            P::debug(),
-          );
+          assert_eq!(abstract_idx.get(), serial + index);
+          assert_eq!(abstract_idx, recovery_idx);
         }
       }
     });

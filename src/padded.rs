@@ -1,7 +1,3 @@
-//! Cache-line padding to prevent false sharing.
-//!
-//! Provides [`CachePadded`], a wrapper that aligns its contents to a cache line.
-
 use core::ops::Deref;
 use core::ops::DerefMut;
 
@@ -84,5 +80,23 @@ impl<T> DerefMut for CachePadded<T> {
   #[inline]
   fn deref_mut(&mut self) -> &mut T {
     &mut self.value
+  }
+}
+
+// -----------------------------------------------------------------------------
+// Tests
+// -----------------------------------------------------------------------------
+
+#[cfg_attr(coverage_nightly, coverage(off))]
+#[cfg(test)]
+mod tests {
+  use crate::padded::CachePadded;
+
+  #[test]
+  fn works() {
+    let mut value: CachePadded<u8> = CachePadded::new(123);
+
+    assert_eq!(&*value, &123);
+    assert_eq!(&mut *value, &123);
   }
 }
