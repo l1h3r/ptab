@@ -145,3 +145,25 @@ jobs:
       - run: cargo test --lib --target x86_64-unknown-linux-gnu -Zbuild-std
         env:
           RUSTFLAGS: -Zsanitizer=thread
+
+  coverage:
+    name: Coverage
+    needs: pre_ci
+    if: needs.pre_ci.outputs.continue
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@nightly
+        with:
+          components: llvm-tools-preview
+      - name: Install cargo-llvm-cov
+        run: cargo install cargo-llvm-cov
+      - name: Generate Coverage
+        run: cargo +nightly llvm-cov --doctests --codecov --output-path lcov.info
+      - name: Upload to Codecov
+        uses: codecov/codecov-action@v5
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: lcov.info
+          fail_ci_if_error: true
