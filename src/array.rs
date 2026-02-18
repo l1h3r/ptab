@@ -1,7 +1,3 @@
-//! Cache-aligned array allocation.
-//!
-//! Provides [`Array`], the backing storage for table slots.
-
 use core::marker::PhantomData;
 use core::mem::ManuallyDrop;
 use core::mem::MaybeUninit;
@@ -29,7 +25,8 @@ impl<T, P> Array<T, P>
 where
   P: Params + ?Sized,
 {
-  /// Creates a new array, initializing each element with the given function.
+  /// Creates an array where each element is produced by calling `init` with
+  /// that element’s index while walking forward through the array.
   #[inline]
   pub(crate) fn new<F>(init: F) -> Self
   where
@@ -37,44 +34,29 @@ where
   {
     let this: Array<MaybeUninit<T>, P> = Self::new_uninit();
 
-    let mut index: usize = 0;
-
-    while index < P::LENGTH.as_usize() {
-      // SAFETY: `index < P::LENGTH` and allocation holds `P::LENGTH` elements.
-      let mut ptr: NonNull<MaybeUninit<T>> = unsafe { this.as_nonnull().add(index) };
-
-      // SAFETY: Pointer is valid and aligned; we have exclusive access.
-      let uninit: &mut MaybeUninit<T> = unsafe { ptr.as_mut() };
-
-      init(index, uninit);
-
-      index += 1;
+    for index in 0..P::LENGTH.as_usize() {
+      // SAFETY:
+      // - `index` is strictly less than `P::LENGTH`.
+      // - The allocation performed by `new_uninit` reserves space for exactly
+      //   `P::LENGTH` contiguous elements.
+      // - The pointer returned by `as_non_null` is properly aligned for `T`.
+      // - We have exclusive access to the allocation, so creating a unique
+      //   mutable reference is sound.
+      init(index, unsafe { this.as_non_null().add(index).as_mut() });
     }
 
-    // SAFETY: All `P::LENGTH` elements initialized by the loop.
+    // SAFETY: The loop above initializes every element in the allocation
+    //         exactly once, so all `P::LENGTH` elements are initialized.
     unsafe { this.assume_init() }
   }
 
-  /// Creates a new array with all bytes zeroed.
-  #[allow(dead_code, reason = "not used with loom tests")]
-  #[inline]
-  pub(crate) fn new_zeroed() -> Array<MaybeUninit<T>, P> {
-    let this: Array<MaybeUninit<T>, P> = Self::new_uninit();
-
-    // SAFETY: Allocation holds `P::LENGTH` elements; zeroing `MaybeUninit` is valid.
-    unsafe {
-      this.as_nonnull().write_bytes(0, P::LENGTH.as_usize());
-    }
-
-    this
-  }
-
-  /// Creates a new array without initializing its contents.
+  /// Constructs a new array with uninitialized contents.
   #[inline]
   pub(crate) fn new_uninit() -> Array<MaybeUninit<T>, P> {
-    P::validate();
-
-    // SAFETY: `P::validate()` ensures `P::LAYOUT` has non-zero size.
+    // SAFETY:
+    // - `P::LAYOUT` describes a non-zero-sized allocation.
+    // - Its size and alignment have been validated when constructing the
+    //   associated `Params` implementation.
     let raw: *mut u8 = unsafe { alloc(P::LAYOUT) };
 
     Array {
@@ -86,50 +68,62 @@ where
     }
   }
 
-  /// Returns a non-null pointer to the array.
+  /// Returns a `NonNull` pointer to the array's buffer.
   #[inline]
-  pub(crate) const fn as_nonnull(&self) -> NonNull<T> {
+  pub(crate) const fn as_non_null(&self) -> NonNull<T> {
     self.nonnull
   }
 
-  /// Returns a raw pointer to the array.
+  /// Returns a raw pointer to the array's buffer.
+  #[cfg(test)]
   #[inline]
   pub(crate) const fn as_ptr(&self) -> *const T {
-    self.as_nonnull().as_ptr()
+    self.as_non_null().as_ptr()
   }
 
-  /// Returns a raw mutable pointer to the array.
+  /// Returns a raw mutable pointer to the array's buffer.
   #[inline]
   pub(crate) const fn as_mut_ptr(&self) -> *mut T {
-    self.as_nonnull().as_ptr()
+    self.as_non_null().as_ptr()
   }
 
+  /// Extracts a slice containing the entire array.
+  #[cfg(test)]
   #[inline]
   pub(crate) const fn as_slice(&self) -> &[T] {
-    // SAFETY: Contiguous allocation of `P::LENGTH` initialized elements.
+    // SAFETY:
+    // - The allocation contains `P::LENGTH` contiguous elements of `T`.
+    // - For `Array<T, P>`, all elements are guaranteed to be initialized.
+    // - The pointer is valid for reads for the entire range.
     unsafe { slice::from_raw_parts(self.as_ptr(), P::LENGTH.as_usize()) }
   }
 
+  /// Extracts a mutable slice of the entire array.
   #[inline]
   pub(crate) const fn as_mut_slice(&mut self) -> &mut [T] {
-    // SAFETY: Contiguous allocation of `P::LENGTH` initialized elements.
+    // SAFETY:
+    // - The allocation contains `P::LENGTH` contiguous elements of `T`.
+    // - For `Array<T, P>`, all elements are guaranteed to be initialized.
+    // - `&mut self` guarantees unique access to the allocation.
     unsafe { slice::from_raw_parts_mut(self.as_mut_ptr(), P::LENGTH.as_usize()) }
   }
 
-  /// Returns a reference to the element at the given index.
+  /// Returns a reference to the element at `index`.
   #[inline]
   pub(crate) const fn get(&self, index: Concrete<P>) -> &T {
-    // SAFETY: `Concrete<P>` indices are always less than `P::LENGTH`.
+    // SAFETY: `Concrete<P>` ensures that the underlying index is strictly less
+    //         than `P::LENGTH`, so it is within bounds.
     unsafe { self.get_unchecked(index.get()) }
   }
 
-  /// Returns a reference to the element at `index` without bounds checking.
+  /// Returns a reference to the element at `index`, without doing bounds
+  /// checking.
   ///
   /// # Safety
   ///
-  /// `index` must be less than [`P::LENGTH`].
-  ///
-  /// [`P::LENGTH`]: Params::LENGTH
+  /// `index` must be strictly less than `P::LENGTH`. Passing an out-of-bounds
+  /// index results in undefined behavior, even if the returned reference is not
+  /// used.
   #[inline]
   pub(crate) const unsafe fn get_unchecked(&self, index: usize) -> &T {
     debug_assert!(
@@ -137,8 +131,11 @@ where
       "Array::get_unchecked requires that the index is in bounds",
     );
 
-    // SAFETY: Caller guarantees `index < P::LENGTH`.
-    unsafe { self.as_nonnull().add(index).as_ref() }
+    // SAFETY:
+    // - The caller guarantees `index < P::LENGTH`.
+    // - The allocation holds `P::LENGTH` contiguous elements.
+    // - The pointer is properly aligned and valid for reads.
+    unsafe { self.as_non_null().add(index).as_ref() }
   }
 }
 
@@ -146,18 +143,22 @@ impl<T, P> Array<MaybeUninit<T>, P>
 where
   P: Params + ?Sized,
 {
-  /// Converts to an initialized array.
+  /// Converts to `Array<T, P>`.
   ///
   /// # Safety
   ///
-  /// All [`P::LENGTH`] elements must be initialized.
-  ///
-  /// [`P::LENGTH`]: Params::LENGTH
+  /// The caller must guarantee that all elements in the allocation are fully
+  /// initialized. If any element is uninitialized, converting to `Array<T, P>`
+  /// results in immediate undefined behavior.
   #[inline]
   pub(crate) unsafe fn assume_init(self) -> Array<T, P> {
+    // SAFETY:
+    // - The caller guarantees that all elements are initialized.
+    // - `Array<MaybeUninit<T>, P>` and `Array<T, P>` have identical layout.
+    // - `ManuallyDrop` prevents `self` from being dropped, so the allocation is
+    //   not freed during the conversion.
     Array {
-      // Prevent drop from running on `self` (would deallocate).
-      nonnull: ManuallyDrop::new(self).as_nonnull().cast(),
+      nonnull: ManuallyDrop::new(self).as_non_null().cast(),
       phantom: PhantomData,
     }
   }
@@ -168,9 +169,12 @@ where
   P: Params + ?Sized,
 {
   fn drop(&mut self) {
-    // SAFETY: Allocated with `P::LAYOUT` in `new_uninit`.
+    // SAFETY:
+    // - The allocation was created with `alloc(P::LAYOUT)` in `new_uninit`.
+    // - `P::LAYOUT` is the exact layout used for allocation.
+    // - `self.nonnull` still points to the original allocation.
     unsafe {
-      dealloc(self.as_nonnull().cast().as_ptr(), P::LAYOUT);
+      dealloc(self.as_non_null().cast().as_ptr(), P::LAYOUT);
     }
   }
 }
@@ -179,19 +183,22 @@ where
 // Tests
 // -----------------------------------------------------------------------------
 
+#[cfg_attr(coverage_nightly, coverage(off))]
 #[cfg(test)]
 mod tests {
   use crate::array::Array;
+  use crate::index::Concrete;
   use crate::params::CACHE_LINE;
-  use crate::params::ConstParams;
+  use crate::params::Params;
   use crate::utils::each_capacity;
 
   #[cfg_attr(loom, ignore = "loom does not run this test")]
   #[test]
   fn alignment() {
     each_capacity!({
-      // SAFETY: `0` is a valid bit pattern for `usize`.
-      let array: Array<usize, P> = unsafe { Array::new_zeroed().assume_init() };
+      let array: Array<usize, P> = Array::new(|_, slot| {
+        slot.write(0);
+      });
 
       // TODO: ptr::is_aligned_to once stable
       assert_eq!(array.as_ptr().addr() & (CACHE_LINE - 1), 0);
@@ -200,24 +207,52 @@ mod tests {
 
   #[cfg_attr(loom, ignore = "loom does not run this test")]
   #[test]
-  fn slice_representation() {
-    let mut array: Array<usize, ConstParams<64>> = Array::new(|index, uninit| {
-      uninit.write(index);
+  fn get() {
+    each_capacity!({
+      let array: Array<usize, P> = Array::new(|index, slot| {
+        slot.write(index);
+      });
+
+      for index in 0..P::LENGTH.as_usize() {
+        assert_eq!(array.get(Concrete::<P>::new(index)), &index);
+      }
     });
+  }
 
-    assert_eq!(array.as_slice().len(), 64);
-    assert_eq!(array.as_mut_slice().len(), 64);
+  #[cfg_attr(loom, ignore = "loom does not run this test")]
+  #[test]
+  fn as_slice() {
+    each_capacity!({
+      let array: Array<usize, P> = Array::new(|index, slot| {
+        slot.write(index);
+      });
 
-    for (index, value) in array.as_slice().iter().enumerate() {
-      assert_eq!(*value, index);
-    }
+      assert_eq!(array.as_slice().len(), P::LENGTH.as_usize());
 
-    for value in array.as_mut_slice() {
-      *value += 1;
-    }
+      for (index, value) in array.as_slice().iter().enumerate() {
+        assert_eq!(*value, index);
+      }
+    });
+  }
 
-    for (index, value) in array.as_slice().iter().enumerate() {
-      assert_eq!(*value, index + 1);
-    }
+  #[cfg_attr(loom, ignore = "loom does not run this test")]
+  #[test]
+  fn as_mut_slice() {
+    each_capacity!({
+      let mut array: Array<usize, P> = Array::new(|index, slot| {
+        slot.write(index);
+      });
+
+      assert_eq!(array.as_mut_slice().len(), P::LENGTH.as_usize());
+
+      for (index, value) in array.as_mut_slice().iter_mut().enumerate() {
+        assert_eq!(*value, index);
+        *value += 1;
+      }
+
+      for (index, value) in array.as_slice().iter().enumerate() {
+        assert_eq!(*value, index + 1);
+      }
+    });
   }
 }

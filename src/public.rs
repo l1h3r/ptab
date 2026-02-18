@@ -2,17 +2,15 @@ use core::fmt::Debug;
 use core::fmt::Formatter;
 use core::fmt::Result;
 use core::mem::MaybeUninit;
-use core::panic::RefUnwindSafe;
-use core::panic::UnwindSafe;
-
-use sdd::Guard;
 
 use crate::index::Detached;
 use crate::params::DefaultParams;
 use crate::params::Params;
 use crate::params::ParamsExt;
 use crate::table::Table;
-use crate::table::WeakKeys;
+
+pub use crate::reclaim::sdd::Guard;
+pub use crate::table::WeakKeys;
 
 /// A lock-free concurrent table.
 ///
@@ -20,7 +18,7 @@ use crate::table::WeakKeys;
 /// opaque [`Detached`] indices. It is parameterized by `P` to configure
 /// capacity at compile time.
 ///
-/// See the [crate-level documentation][crate] for an overview and examples.
+/// See the [crate-level documentation] for an overview and examples.
 ///
 /// # Type Parameters
 ///
@@ -49,7 +47,11 @@ use crate::table::WeakKeys;
 /// assert_eq!(table.capacity(), 256);
 /// ```
 ///
+/// [crate-level documentation]: crate
+/// [`Detached`]: crate::index::Detached
 /// [`ConstParams`]: crate::params::ConstParams
+/// [`DefaultParams`]: crate::params::DefaultParams
+/// [`Params`]: crate::params::Params
 #[repr(transparent)]
 pub struct PTab<T, P = DefaultParams>
 where
@@ -91,6 +93,8 @@ where
   /// let table: PTab<u64, ConstParams<512>> = PTab::new();
   /// assert_eq!(table.capacity(), 512);
   /// ```
+  ///
+  /// [`Params::LENGTH`]: crate::params::Params::LENGTH
   #[inline]
   pub const fn capacity(&self) -> usize {
     self.inner.cap()
@@ -137,7 +141,7 @@ where
 
   /// Inserts a value into the table and returns its index.
   ///
-  /// Returns [`None`] if the table is at capacity. Use [`write`] instead when
+  /// Returns [`None`] if the table is at capacity. Use [`write()`] instead when
   /// the stored value needs to know its own index.
   ///
   /// # Examples
@@ -151,7 +155,7 @@ where
   /// assert!(table.exists(idx));
   /// ```
   ///
-  /// [`write`]: Self::write
+  /// [`write()`]: Self::write
   #[inline]
   pub fn insert(&self, value: T) -> Option<Detached>
   where
@@ -323,7 +327,7 @@ where
   /// ```
   #[inline]
   pub fn weak_keys(&self) -> WeakKeys<'_, T, P> {
-    self.inner.weak_keys()
+    self.inner.weak_keys(Guard::new())
   }
 }
 
@@ -334,8 +338,8 @@ where
 {
   fn fmt(&self, f: &mut Formatter<'_>) -> Result {
     f.debug_struct("PTab")
+      .field("values", &self.inner)
       .field("params", &P::debug())
-      .field("entries", &self.inner)
       .finish()
   }
 }
@@ -349,26 +353,3 @@ where
     Self::new()
   }
 }
-
-// SAFETY: Internal state uses atomics and epoch-based reclamation; sharing
-// across threads is safe when `T` can be sent between threads.
-unsafe impl<T, P> Send for PTab<T, P>
-where
-  T: Send,
-  P: Params + ?Sized,
-{
-}
-
-// SAFETY: Concurrent access is mediated through atomics. `T: Sync` is not
-// required because `with` only provides shared references.
-unsafe impl<T, P> Sync for PTab<T, P>
-where
-  T: Send,
-  P: Params + ?Sized,
-{
-}
-
-// Unconditional because `PTab` provides only shared access to `T` via `with`,
-// and epoch-based reclamation handles panic unwind safely.
-impl<T, P> RefUnwindSafe for PTab<T, P> where P: Params + ?Sized {}
-impl<T, P> UnwindSafe for PTab<T, P> where P: Params + ?Sized {}

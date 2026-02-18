@@ -1,6 +1,6 @@
 macro_rules! each_capacity {
   ($expr:expr) => {
-    #[cfg(any(coverage, coverage_nightly, miri))]
+    #[cfg(not(feature = "slow"))]
     {
       $crate::utils::each_capacity!(
         @impl $expr,
@@ -8,7 +8,7 @@ macro_rules! each_capacity {
       );
     }
 
-    #[cfg(not(any(coverage, coverage_nightly, miri)))]
+    #[cfg(feature = "slow")]
     {
       $crate::utils::each_capacity!(
         @impl $expr,
@@ -22,7 +22,8 @@ macro_rules! each_capacity {
     )+
   };
   (@run $expr:expr, $bits:expr) => {{
-    type P = $crate::params::ConstParams::<{ 1 << $bits }>;
+    const S: usize = 1 << $bits;
+    type P = $crate::params::ConstParams::<{ S }>;
     $expr
   }};
 }
