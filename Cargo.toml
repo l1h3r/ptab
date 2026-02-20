@@ -25,7 +25,7 @@ rustdoc-args = [
 ]
 
 [dependencies]
-sdd = { version = "4.6.2", default-features = false }
+sdd = { version = "4.6", default-features = false, optional = true }
 
 [target."cfg(loom)".dependencies]
 loom = { version = "0.7", default-features = false, optional = true }
@@ -40,7 +40,10 @@ shuttle = { version = "0.8", default-features = false, optional = true }
 shuttle = { version = "0.8", default-features = false }
 
 [features]
-default = ["std"]
+default = ["sdd"]
+
+# Enable support for the sdd-based reclamation strategy.
+sdd = ["dep:sdd", "std"]
 
 # Enable support for compiling with Rust's standard library.
 std = []
@@ -49,6 +52,9 @@ std = []
 alloc = []
 
 # Enable tests that are generally quite slow.
+#
+# This configuration option is outside of the normal semver guarantees: minor
+# versions of ptab may make breaking changes to it at any time.
 slow = []
 
 # Enable the use of loom for concurrency testing.

@@ -7,9 +7,9 @@ use crate::index::Detached;
 use crate::params::DefaultParams;
 use crate::params::Params;
 use crate::params::ParamsExt;
+use crate::reclaim::Collector;
 use crate::table::Table;
 
-pub use crate::reclaim::sdd::Guard;
 pub use crate::table::WeakKeys;
 
 /// A lock-free concurrent table.
@@ -225,7 +225,10 @@ where
   /// assert!(!table.remove(idx)); // Already gone
   /// ```
   #[inline]
-  pub fn remove(&self, index: Detached) -> bool {
+  pub fn remove(&self, index: Detached) -> bool
+  where
+    P::Collector: Collector, // Enforce safe reclamation
+  {
     self.inner.remove(index)
   }
 
@@ -247,7 +250,7 @@ where
   /// ```
   #[inline]
   pub fn exists(&self, index: Detached) -> bool {
-    self.inner.exists(index, &Guard::new())
+    self.inner.exists(index, &P::guard())
   }
 
   /// Accesses an entry by index, applying a function to it.
@@ -272,7 +275,7 @@ where
   where
     F: Fn(&T) -> R,
   {
-    self.inner.with(index, &Guard::new(), f)
+    self.inner.with(index, &P::guard(), f)
   }
 
   /// Returns a copy of the entry at the given index.
@@ -295,7 +298,7 @@ where
   where
     T: Copy,
   {
-    self.inner.read(index, &Guard::new())
+    self.inner.read(index, &P::guard())
   }
 
   /// Returns a weakly consistent iterator over all currently allocated indices.
@@ -327,7 +330,7 @@ where
   /// ```
   #[inline]
   pub fn weak_keys(&self) -> WeakKeys<'_, T, P> {
-    self.inner.weak_keys(Guard::new())
+    self.inner.weak_keys(P::guard())
   }
 }
 

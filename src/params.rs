@@ -8,6 +8,8 @@ use core::num::NonZeroUsize;
 
 use crate::alloc::Layout;
 use crate::padded::CachePadded;
+use crate::reclaim::CollectorWeak;
+use crate::reclaim::collector;
 use crate::sync::atomic::AtomicUsize;
 
 // -----------------------------------------------------------------------------
@@ -39,7 +41,7 @@ const _: () = assert!(
 // Configurable Params
 // -----------------------------------------------------------------------------
 
-/// Configuration parameters for a [`PTab`].
+/// Compile-time configuration for a [`PTab`].
 ///
 /// Allows compile-time customization of table parameters. The simplest approach
 /// is through [`ConstParams`]:
@@ -52,6 +54,13 @@ const _: () = assert!(
 ///
 /// [`PTab`]: crate::public::PTab
 pub trait Params {
+  /// The memory reclamation strategy used for removed entries.
+  ///
+  /// See [`Collector`] for more info.
+  ///
+  /// [`Collector`]: crate::reclaim::Collector
+  type Collector: CollectorWeak;
+
   /// The maximum number of entries the table can hold.
   ///
   /// See [`Capacity`] for more info.
@@ -91,6 +100,16 @@ pub trait ParamsExt: Params + Sealed {
     DebugParams {
       marker: PhantomData,
     }
+  }
+
+  #[inline]
+  fn guard() -> <Self::Collector as CollectorWeak>::Guard {
+    <Self::Collector as CollectorWeak>::guard()
+  }
+
+  #[inline]
+  fn flush() {
+    <Self::Collector as CollectorWeak>::flush();
   }
 }
 
@@ -161,6 +180,12 @@ where
 pub struct DefaultParams;
 
 impl Params for DefaultParams {
+  #[cfg(not(feature = "sdd"))]
+  type Collector = collector::Leak;
+
+  #[cfg(feature = "sdd")]
+  type Collector = collector::Sdd;
+
   const LENGTH: Capacity = Capacity::DEF;
 }
 
@@ -195,6 +220,8 @@ impl Params for DefaultParams {
 pub struct ConstParams<const N: usize>;
 
 impl<const N: usize> Params for ConstParams<N> {
+  type Collector = <DefaultParams as Params>::Collector;
+
   const LENGTH: Capacity = Capacity::new(N);
 }
 
