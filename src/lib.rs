@@ -123,6 +123,7 @@
 //! [`sdd`]: https://docs.rs/sdd
 //!
 
+#![cfg_attr(docsrs, feature(doc_cfg))]
 #![cfg_attr(coverage_nightly, feature(coverage_attribute))]
 
 mod array;
@@ -153,6 +154,22 @@ pub mod config {
   pub use crate::params::DefaultParams;
   pub use crate::params::Params;
   pub use crate::params::ParamsExt;
+}
+
+pub mod garbage {
+  //! Memory reclamation traits and built-in strategies.
+  //!
+  //! This module exposes the internal reclamation API used by `ptab`. You do
+  //! not need to interact with these traits directly unless implementing
+  //! [`Params`] or your own custom collector.
+  //!
+  //! [`Params`]: crate::params::Params
+
+  pub use crate::reclaim::Atomic;
+  pub use crate::reclaim::Collector;
+  pub use crate::reclaim::CollectorWeak;
+  pub use crate::reclaim::Shared;
+  pub use crate::reclaim::collector;
 }
 
 #[doc(inline)]

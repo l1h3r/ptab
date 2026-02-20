@@ -25,10 +25,21 @@ rustdoc-args = [
 ]
 
 [dependencies]
-sdd = { version = "4.6.2", default-features = false }
+sdd = { version = "4.6.3", default-features = false, optional = true }
+
+[dev-dependencies]
+ptab = { path = ".", features = ["sdd"] }
 
 [features]
+default = []
+
+std = []
+sdd = ["dep:sdd", "std"]
+
 # Enable tests that are generally quite slow.
+#
+# This configuration option is outside of the normal semver guarantees: minor
+# versions of ptab may make breaking changes to it at any time.
 slow = []
 
 # Enable the use of loom for concurrency testing.

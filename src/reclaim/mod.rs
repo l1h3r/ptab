@@ -1,12 +1,17 @@
-pub(crate) mod leak;
-pub(crate) mod sdd;
+mod traits;
+
+pub mod collector;
+
+pub use self::traits::Atomic;
+pub use self::traits::Collector;
+pub use self::traits::CollectorWeak;
+pub use self::traits::Shared;
 
 // -----------------------------------------------------------------------------
 // Sanity Check
 // -----------------------------------------------------------------------------
 
-const _: () = assert!(align_of::<leak::Atomic<()>>() == align_of::<usize>());
-const _: () = assert!(size_of::<leak::Atomic<()>>() == size_of::<usize>());
+const _: () = <collector::Leak as CollectorWeak>::ASSERT_ATOMIC;
 
-const _: () = assert!(align_of::<sdd::Atomic<()>>() == align_of::<usize>());
-const _: () = assert!(size_of::<sdd::Atomic<()>>() == size_of::<usize>());
+#[cfg(feature = "sdd")]
+const _: () = <collector::Sdd as CollectorWeak>::ASSERT_ATOMIC;
