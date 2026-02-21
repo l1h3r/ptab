@@ -164,8 +164,10 @@ pub use self::config::ConstParams;
 #[doc(inline)]
 pub use self::config::DefaultParams;
 
+#[doc(inline)]
+pub use self::config::Params;
+
 pub use self::index::Detached;
 
-pub use self::public::Guard;
 pub use self::public::PTab;
 pub use self::public::WeakKeys;
