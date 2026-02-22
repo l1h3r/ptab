@@ -55,7 +55,6 @@ See [`IMPLEMENTATION.md`] for details.
 [//]: # (links)
 
 [`IMPLEMENTATION.md`]: IMPLEMENTATION.md
-[`sharded-slab`]: https://crates.io/crates/sharded-slab
 [`sdd`]: https://crates.io/crates/sdd
 
 [//]: # (badges)
