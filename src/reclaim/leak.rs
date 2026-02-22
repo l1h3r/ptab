@@ -7,6 +7,8 @@ use core::ptr::NonNull;
 use core::sync::atomic::AtomicPtr;
 use core::sync::atomic::Ordering;
 
+use crate::alloc::Box;
+
 #[allow(dead_code, reason = "not used by loom/shuttle tests")]
 #[cfg(test)]
 #[inline]
