@@ -28,6 +28,14 @@ rustdoc-args = [
 sdd = { version = "4.6.2", default-features = false }
 
 [features]
+default = ["std"]
+
+# Enable support for compiling with Rust's standard library.
+std = []
+
+# Enable support for compiling with Rust's allocation library.
+alloc = []
+
 # Enable tests that are generally quite slow.
 slow = []
 
