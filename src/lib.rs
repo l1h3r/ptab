@@ -91,9 +91,11 @@
 //!
 //! ## Memory Reclamation
 //!
-//! Removed entries are reclaimed using epoch-based memory management via
-//! [`sdd`]. This ensures concurrent readers can safely access entries even
-//! while other threads are removing them.
+//! Removed entries are reclaimed using a pluggable memory management strategy.
+//! By default, epoch-based reclamation via [`sdd`] ensures safe concurrent
+//! access. In no-std environments, a leak-based fallback is available.
+//!
+//! See [`memory`] for reclamation trait details and custom implementations.
 //!
 //! # Memory Layout
 //!
@@ -108,16 +110,17 @@
 //! Capacity is bounded by [`Capacity::MIN`] and [`Capacity::MAX`]. The default
 //! is [`Capacity::DEF`]. When full, [`PTab::insert()`] returns [`None`].
 //!
-//! [Capacity::MAX]: crate::config::Capacity::MAX
-//! [Capacity::MIN]: crate::config::Capacity::MIN
-//! [`CACHE_LINE_SLOTS`]: crate::config::CACHE_LINE_SLOTS
-//! [`Capacity::DEF`]: crate::config::Capacity::DEF
-//! [`Capacity::MAX`]: crate::config::Capacity::MAX
-//! [`Capacity::MIN`]: crate::config::Capacity::MIN
-//! [`ConstParams`]: crate::config::ConstParams
-//! [`DefaultParams`]: crate::config::DefaultParams
-//! [`Params`]: crate::config::Params
+//! [Capacity::MAX]: crate::params::Capacity::MAX
+//! [Capacity::MIN]: crate::params::Capacity::MIN
+//! [`CACHE_LINE_SLOTS`]: crate::params::CACHE_LINE_SLOTS
+//! [`Capacity::DEF`]: crate::params::Capacity::DEF
+//! [`Capacity::MAX`]: crate::params::Capacity::MAX
+//! [`Capacity::MIN`]: crate::params::Capacity::MIN
+//! [`ConstParams`]: crate::params::ConstParams
+//! [`DefaultParams`]: crate::params::DefaultParams
+//! [`Params`]: crate::params::Params
 //! [`PTab::insert()`]: crate::public::PTab::insert
+//! [`memory`]: crate::memory
 //!
 //! [ABA problem]: https://en.wikipedia.org/wiki/ABA_problem
 //! [`sdd`]: https://docs.rs/sdd
@@ -125,6 +128,7 @@
 
 #![cfg_attr(not(feature = "std"), no_std)]
 #![cfg_attr(coverage_nightly, feature(coverage_attribute))]
+#![cfg_attr(docsrs, feature(doc_cfg))]
 
 #[cfg(all(feature = "alloc", not(feature = "std")))]
 extern crate alloc as rust_alloc;
@@ -160,6 +164,22 @@ pub mod config {
   pub use crate::params::DefaultParams;
   pub use crate::params::Params;
   pub use crate::params::ParamsExt;
+}
+
+pub mod memory {
+  //! Memory reclamation traits and built-in strategies.
+  //!
+  //! This module exposes the internal reclamation API used by `ptab`. You do
+  //! not need to interact with these traits directly unless implementing
+  //! [`Params`] or your own custom collector.
+  //!
+  //! [`Params`]: crate::params::Params
+
+  pub use crate::reclaim::Atomic;
+  pub use crate::reclaim::Collector;
+  pub use crate::reclaim::CollectorWeak;
+  pub use crate::reclaim::Shared;
+  pub use crate::reclaim::collector;
 }
 
 #[doc(inline)]
