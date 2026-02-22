@@ -17,9 +17,10 @@ use crate::params::CACHE_LINE_SLOTS;
 use crate::params::Capacity;
 use crate::params::Params;
 use crate::params::ParamsExt;
-use crate::reclaim::sdd::Atomic;
-use crate::reclaim::sdd::Guard;
-use crate::reclaim::sdd::Shared;
+use crate::reclaim;
+use crate::reclaim::Atomic as _;
+use crate::reclaim::CollectorWeak;
+use crate::reclaim::Shared as _;
 use crate::sync::atomic::AtomicU32;
 use crate::sync::atomic::AtomicUsize;
 use crate::sync::atomic::Ordering::AcqRel;
@@ -29,6 +30,14 @@ use crate::sync::atomic::Ordering::Release;
 
 /// Marker indicating a slot is reserved for an in-progress allocation.
 const RESERVED: usize = usize::MAX;
+
+type Guard<P> = <<P as Params>::Collector as CollectorWeak>::Guard;
+
+type Atomic<T, P> = <<P as Params>::Collector as CollectorWeak>::Atomic<T>;
+type Shared<'guard, T, P> = <Atomic<T, P> as reclaim::Atomic<T>>::Shared<'guard>;
+
+type DataArray<T, P> = Array<Atomic<T, P>, P>;
+type SlotArray<P> = Array<AtomicUsize, P>;
 
 // -----------------------------------------------------------------------------
 // Table State
@@ -122,7 +131,7 @@ where
   #[inline]
   pub(crate) fn remove(&self, key: Detached) -> bool {
     let index: Concrete<P> = Concrete::from_detached(key);
-    let entry: &Atomic<T> = self.readonly.data.get(index);
+    let entry: &Atomic<T, P> = self.readonly.data.get(index);
 
     if entry.evict(AcqRel) {
       self.release_slot(Abstract::from_detached(key));
@@ -133,7 +142,7 @@ where
   }
 
   #[inline]
-  pub(crate) fn with<F, R>(&self, key: Detached, guard: &Guard, f: F) -> Option<R>
+  pub(crate) fn with<F, R>(&self, key: Detached, guard: &Guard<P>, f: F) -> Option<R>
   where
     F: Fn(&T) -> R,
   {
@@ -141,12 +150,12 @@ where
   }
 
   #[inline]
-  pub(crate) fn exists(&self, key: Detached, guard: &Guard) -> bool {
+  pub(crate) fn exists(&self, key: Detached, guard: &Guard<P>) -> bool {
     !self.find(key, guard).is_null()
   }
 
   #[inline]
-  pub(crate) fn read(&self, key: Detached, guard: &Guard) -> Option<T>
+  pub(crate) fn read(&self, key: Detached, guard: &Guard<P>) -> Option<T>
   where
     T: Copy,
   {
@@ -154,18 +163,18 @@ where
   }
 
   #[inline]
-  pub(crate) fn weak_keys(&self, guard: Guard) -> WeakKeys<'_, T, P> {
+  pub(crate) fn weak_keys(&self, guard: Guard<P>) -> WeakKeys<'_, T, P> {
     WeakKeys::new(guard, self)
   }
 
   #[inline]
-  fn find<'guard>(&self, key: Detached, guard: &'guard Guard) -> Shared<'guard, T> {
+  fn find<'guard>(&self, key: Detached, guard: &'guard Guard<P>) -> Shared<'guard, T, P> {
     self.load(Concrete::from_detached(key), guard)
   }
 
   #[inline]
-  fn load<'guard>(&self, index: Concrete<P>, guard: &'guard Guard) -> Shared<'guard, T> {
-    self.readonly.data.get(index).load(Acquire, guard)
+  fn load<'guard>(&self, index: Concrete<P>, guard: &'guard Guard<P>) -> Shared<'guard, T, P> {
+    self.readonly.data.get(index).read(Acquire, guard)
   }
 
   #[inline]
@@ -249,7 +258,7 @@ where
       // - `Drop` provides exclusive access via `&mut self`, so no concurrent
       //   access can occur.
       // - Each slot is dropped at most once.
-      if unsafe { entry.drop_in_place() } {
+      if unsafe { entry.clear() } {
         count = count.wrapping_sub(1);
 
         if count == 0 {
@@ -295,7 +304,7 @@ where
   P: Params + ?Sized,
 {
   fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
-    let guard: Guard = Guard::new();
+    let guard: Guard<P> = <P::Collector as CollectorWeak>::guard();
     let mut debug: DebugMap<'_, '_> = f.debug_map();
 
     for index in 0..P::LENGTH.as_usize() {
@@ -398,8 +407,8 @@ struct ReadOnly<T, P>
 where
   P: Params + ?Sized,
 {
-  data: Array<Atomic<T>, P>,
-  slot: Array<AtomicUsize, P>,
+  data: DataArray<T, P>,
+  slot: SlotArray<P>,
 }
 
 impl<T, P> ReadOnly<T, P>
@@ -415,14 +424,14 @@ where
   }
 
   #[inline]
-  fn new_data_array() -> Array<Atomic<T>, P> {
+  fn new_data_array() -> DataArray<T, P> {
     Array::new(|_, slot| {
-      slot.write(Atomic::null());
+      slot.write(Atomic::<T, P>::null());
     })
   }
 
   #[inline]
-  fn new_slot_array() -> Array<AtomicUsize, P> {
+  fn new_slot_array() -> SlotArray<P> {
     Array::new(|offset, item| {
       let block: usize = offset / CACHE_LINE_SLOTS;
       let index: usize = offset % CACHE_LINE_SLOTS;
@@ -480,8 +489,8 @@ pub struct WeakKeys<'table, T, P>
 where
   P: Params + ?Sized,
 {
-  array: NonNull<Atomic<T>>,
-  guard: Guard,
+  array: NonNull<Atomic<T, P>>,
+  guard: Guard<P>,
   total: usize,
   index: usize,
   table: PhantomData<&'table Table<T, P>>,
@@ -492,7 +501,7 @@ where
   P: Params + ?Sized,
 {
   #[inline]
-  pub(crate) fn new(guard: Guard, table: &'table Table<T, P>) -> Self {
+  pub(crate) fn new(guard: Guard<P>, table: &'table Table<T, P>) -> Self {
     Self {
       array: table.readonly.data.as_non_null(),
       guard,
@@ -520,7 +529,7 @@ where
 
   #[inline]
   fn next(&mut self) -> Option<Self::Item> {
-    let guard: &Guard = &self.guard;
+    let guard: &Guard<P> = &self.guard;
     let total: usize = self.total;
 
     let mut index: usize = self.index;
@@ -531,19 +540,19 @@ where
 
       index += 1;
 
-      let ptr: Shared<'_, T> = {
+      let ptr: Shared<'_, T, P> = {
         // SAFETY:
         // - `Concrete<P>` guarantees `concrete_idx.get() < P::LENGTH`.
         // - `self.array` points to a contiguous allocation of `P::LENGTH` elements.
-        let raw: NonNull<Atomic<T>> = unsafe { self.array.add(concrete_idx.get()) };
+        let raw: NonNull<Atomic<T, P>> = unsafe { self.array.add(concrete_idx.get()) };
 
         // SAFETY:
         // - `raw` was derived from a valid allocation.
         // - The pointer is properly aligned for `Atomic<T>`.
         // - The iterator only performs shared access.
-        let data: &Atomic<T> = unsafe { raw.as_ref() };
+        let data: &Atomic<T, P> = unsafe { raw.as_ref() };
 
-        data.load(Acquire, guard)
+        data.read(Acquire, guard)
       };
 
       if ptr.is_null() {
@@ -575,7 +584,6 @@ mod tests {
   use std::thread;
   use std::thread::JoinHandle;
 
-  use crate::array::Array;
   use crate::index::Abstract;
   use crate::index::Concrete;
   use crate::index::Detached;
@@ -584,14 +592,16 @@ mod tests {
   use crate::params::ConstParams;
   use crate::params::Params;
   use crate::params::ParamsExt;
-  use crate::reclaim::sdd;
-  use crate::reclaim::sdd::Atomic;
-  use crate::reclaim::sdd::Guard;
+  use crate::reclaim::Atomic as _;
   use crate::sync::atomic::AtomicUsize;
   use crate::sync::atomic::Ordering;
   use crate::table;
+  use crate::table::Atomic;
+  use crate::table::DataArray;
+  use crate::table::Guard;
   use crate::table::Permit;
   use crate::table::RESERVED;
+  use crate::table::SlotArray;
   use crate::table::Table;
 
   type DefParams = ConstParams<{ Capacity::DEF.as_usize() }>;
@@ -640,18 +650,18 @@ mod tests {
 
   #[test]
   fn new_data_array() {
-    let array: Array<Atomic<u64>, DefParams> = ReadOnly::new_data_array();
-    let slice: &[Atomic<u64>] = array.as_slice();
-    let guard: Guard = Guard::new();
+    let array: DataArray<u64, DefParams> = ReadOnly::new_data_array();
+    let slice: &[Atomic<u64, DefParams>] = array.as_slice();
+    let guard: Guard<DefParams> = DefParams::guard();
 
     for atomic in slice {
-      assert!(atomic.load(Ordering::Relaxed, &guard).is_null());
+      assert!(atomic.read(Ordering::Relaxed, &guard).is_null());
     }
   }
 
   #[test]
   fn new_slot_array() {
-    let array: Array<AtomicUsize, DefParams> = ReadOnly::new_slot_array();
+    let array: SlotArray<DefParams> = ReadOnly::new_slot_array();
     let slice: &[AtomicUsize] = array.as_slice();
 
     let mut offset: usize = 0;
@@ -955,7 +965,7 @@ mod tests {
   #[test]
   fn write_callback_correct_index() {
     let table: Table<usize, DefParams> = Table::new();
-    let guard: Guard = Guard::new();
+    let guard: Guard<DefParams> = DefParams::guard();
 
     let index: Detached = table
       .write(|uninit, index| {
@@ -992,7 +1002,7 @@ mod tests {
   #[test]
   fn remove_recycling() {
     let table: Table<usize, DefParams> = Table::new();
-    let guard: Guard = Guard::new();
+    let guard: Guard<DefParams> = DefParams::guard();
     let mut keys: Vec<Detached> = Vec::with_capacity(table.cap());
 
     for index in 0..table.cap() {
@@ -1019,7 +1029,7 @@ mod tests {
   #[test]
   fn with() {
     let table: Table<usize, DefParams> = Table::new();
-    let guard: Guard = Guard::new();
+    let guard: Guard<DefParams> = DefParams::guard();
     let index: Detached = table.insert(123).unwrap();
 
     assert_eq!(table.with(index, &guard, |item| item + 1), Some(124));
@@ -1028,7 +1038,7 @@ mod tests {
   #[test]
   fn with_nonexistent() {
     let table: Table<usize, DefParams> = Table::new();
-    let guard: Guard = Guard::new();
+    let guard: Guard<DefParams> = DefParams::guard();
     let index: Detached = Detached::from_bits(123);
 
     assert_eq!(table.with(index, &guard, |item| item + 1), None);
@@ -1037,7 +1047,7 @@ mod tests {
   #[test]
   fn exists() {
     let table: Table<usize, DefParams> = Table::new();
-    let guard: Guard = Guard::new();
+    let guard: Guard<DefParams> = DefParams::guard();
     let index: Detached = table.insert(123).unwrap();
 
     assert!(table.exists(index, &guard));
@@ -1046,7 +1056,7 @@ mod tests {
   #[test]
   fn exists_nonexistent() {
     let table: Table<usize, DefParams> = Table::new();
-    let guard: Guard = Guard::new();
+    let guard: Guard<DefParams> = DefParams::guard();
     let index: Detached = Detached::from_bits(123);
 
     refute!(table.exists(index, &guard));
@@ -1055,7 +1065,7 @@ mod tests {
   #[test]
   fn read() {
     let table: Table<usize, DefParams> = Table::new();
-    let guard: Guard = Guard::new();
+    let guard: Guard<DefParams> = DefParams::guard();
     let index: Detached = table.insert(123).unwrap();
 
     assert_eq!(table.read(index, &guard), Some(123));
@@ -1064,7 +1074,7 @@ mod tests {
   #[test]
   fn read_nonexistent() {
     let table: Table<usize, DefParams> = Table::new();
-    let guard: Guard = Guard::new();
+    let guard: Guard<DefParams> = DefParams::guard();
     let index: Detached = Detached::from_bits(123);
 
     assert_eq!(table.read(index, &guard), None);
@@ -1075,15 +1085,15 @@ mod tests {
     let table: Table<usize, DefParams> = Table::new();
     let mut keys: Vec<Detached> = Vec::with_capacity(table.cap());
 
-    assert_eq!(table.weak_keys(Guard::new()).next(), None);
+    assert_eq!(table.weak_keys(DefParams::guard()).next(), None);
 
     for index in 0..table.cap() {
       keys.push(table.insert(index).unwrap());
     }
 
-    assert_eq!(table.weak_keys(Guard::new()).count(), table.cap());
+    assert_eq!(table.weak_keys(DefParams::guard()).count(), table.cap());
 
-    for (init_key, iter_key) in keys.into_iter().zip(table.weak_keys(Guard::new())) {
+    for (init_key, iter_key) in keys.into_iter().zip(table.weak_keys(DefParams::guard())) {
       assert_eq!(init_key, iter_key);
     }
   }
@@ -1118,7 +1128,7 @@ mod tests {
 
     // Force garbage collection - this should always succeed
     // for our use-case since we are single-threaded
-    sdd::try_reclaim();
+    DefParams::flush();
 
     assert_eq!(DropMe::load(), table.cap() as u32 / 2);
     assert_eq!(DropMe::load(), table.len());
@@ -1169,7 +1179,7 @@ mod tests {
   #[test]
   fn debug_weak_keys() {
     let table: Table<usize, DefParams> = Table::new();
-    let debug: String = format!("{:?}", table.weak_keys(Guard::new()));
+    let debug: String = format!("{:?}", table.weak_keys(DefParams::guard()));
 
     assert_eq!(debug, "WeakKeys(..)");
   }
@@ -1179,7 +1189,7 @@ mod tests {
   #[test]
   fn min_capacity_ops() {
     let table: Table<usize, MinParams> = Table::new();
-    let guard: Guard = Guard::new();
+    let guard: Guard<DefParams> = DefParams::guard();
     let index: Detached = table.insert(123).unwrap();
 
     assert!(table.exists(index, &guard));

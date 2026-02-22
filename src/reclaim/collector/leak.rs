@@ -1,5 +1,3 @@
-#![allow(dead_code)]
-
 use core::marker::PhantomData;
 use core::mem::MaybeUninit;
 use core::ptr;
@@ -7,46 +5,57 @@ use core::ptr::NonNull;
 use core::sync::atomic::AtomicPtr;
 use core::sync::atomic::Ordering;
 
-#[allow(dead_code, reason = "not used by loom/shuttle tests")]
-#[cfg(test)]
-#[inline]
-pub(crate) fn try_reclaim() {
-  // do nothing
+use crate::reclaim::Atomic;
+use crate::reclaim::CollectorWeak;
+use crate::reclaim::Shared;
+
+/// A reclamation strategy that leaks evicted entries.
+pub enum Leak {}
+
+impl CollectorWeak for Leak {
+  type Guard = ();
+  type Atomic<T> = AtomicPtr<T>;
+
+  #[inline]
+  fn guard() -> Self::Guard {
+    // do nothing
+  }
+
+  #[inline]
+  fn flush() {
+    // do nothing
+  }
 }
 
 // -----------------------------------------------------------------------------
 // Atomic Ptr
 // -----------------------------------------------------------------------------
 
-/// An atomic pointer that can be safely shared between threads.
-#[repr(transparent)]
-pub(crate) struct Atomic<T> {
-  inner: AtomicPtr<T>,
-}
+impl<T> Atomic<T> for AtomicPtr<T> {
+  type Guard = ();
 
-impl<T> Atomic<T> {
-  /// Creates a null atomic pointer.
+  #[rustfmt::skip]
+  type Shared<'guard> = Ptr<'guard, T>
+  where
+    T: 'guard;
+
   #[inline]
-  pub(crate) const fn null() -> Self {
-    Self {
-      inner: AtomicPtr::new(ptr::null_mut()),
-    }
+  fn null() -> Self {
+    Self::new(ptr::null_mut())
   }
 
-  /// Loads a value from the pointer.
   #[inline]
-  pub(crate) fn load<'guard>(&self, order: Ordering, _guard: &'guard Guard) -> Shared<'guard, T> {
-    Shared {
-      pointer: self.inner.load(order),
+  fn read<'guard>(&self, order: Ordering, _guard: &'guard Self::Guard) -> Self::Shared<'guard> {
+    Self::Shared {
+      pointer: self.load(order),
       phantom: PhantomData,
     }
   }
 
-  /// Initializes and stores a value into the pointer.
   #[inline]
-  pub(crate) fn write<F>(&self, order: Ordering, init: F)
+  fn write(&self, order: Ordering, init: impl FnOnce(&mut MaybeUninit<T>))
   where
-    F: FnOnce(&mut MaybeUninit<T>),
+    T: 'static,
   {
     let mut uninit: Box<MaybeUninit<T>> = Box::new_uninit();
 
@@ -55,20 +64,18 @@ impl<T> Atomic<T> {
     // SAFETY:
     // - The `init` closure is required to fully initialize `uninit`.
     // - After `init` returns, the value is assumed to be initialized.
-    self
-      .inner
-      .store(Box::into_raw(unsafe { uninit.assume_init() }), order);
+    self.store(Box::into_raw(unsafe { uninit.assume_init() }), order);
   }
 
   #[inline]
-  pub(crate) fn evict(&self, order: Ordering) -> bool {
+  fn evict(&self, order: Ordering) -> bool {
     // True to the name, we leak the entry `Box<T>` here
-    !self.inner.swap(ptr::null_mut(), order).is_null()
+    !self.swap(ptr::null_mut(), order).is_null()
   }
 
   #[inline]
-  pub(crate) unsafe fn drop_in_place(&mut self) -> bool {
-    if let Some(ptr) = NonNull::new(*self.inner.get_mut()) {
+  unsafe fn clear(&mut self) -> bool {
+    if let Some(ptr) = NonNull::new(*self.get_mut()) {
       // SAFETY:
       // - `ptr` was previously created by `Box::into_raw`, so it originated
       //   from a valid `Box<T>` allocation.
@@ -90,21 +97,19 @@ impl<T> Atomic<T> {
 
 /// A pointer to an unprotected object.
 #[repr(transparent)]
-pub(crate) struct Shared<'guard, T> {
+pub struct Ptr<'guard, T> {
   pointer: *mut T,
   phantom: PhantomData<&'guard T>,
 }
 
-impl<'guard, T> Shared<'guard, T> {
-  /// Returns `true` if the pointer is null.
+impl<'guard, T> Shared<'guard, T> for Ptr<'guard, T> {
   #[inline]
-  pub(crate) const fn is_null(&self) -> bool {
+  fn is_null(&self) -> bool {
     self.pointer.is_null()
   }
 
-  /// Returns a shared reference to the value.
   #[inline]
-  pub(crate) const fn as_ref(&self) -> Option<&'guard T> {
+  fn as_ref(&self) -> Option<&'guard T> {
     // SAFETY:
     // - `self.pointer` is either null or points to a fully initialized `T`
     //   written via `Atomic::write`.
@@ -113,28 +118,5 @@ impl<'guard, T> Shared<'guard, T> {
     // - Only shared references to `T` are created, so aliasing rules are not
     //   violated.
     unsafe { self.pointer.as_ref() }
-  }
-}
-
-// -----------------------------------------------------------------------------
-// Guard
-// -----------------------------------------------------------------------------
-
-/// A guard that does nothing.
-#[non_exhaustive]
-pub struct Guard;
-
-impl Guard {
-  /// Creates a new [`Guard`].
-  #[inline]
-  pub const fn new() -> Self {
-    Self
-  }
-}
-
-impl Default for Guard {
-  #[inline]
-  fn default() -> Self {
-    Self::new()
   }
 }
