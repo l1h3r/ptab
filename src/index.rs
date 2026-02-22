@@ -132,6 +132,20 @@ impl Detached {
   pub const fn into_bits(self) -> usize {
     self.bits
   }
+
+  /// Translates this index into its `(number, serial)` components.
+  #[inline]
+  pub const fn decompose<P>(self) -> (u32, u32)
+  where
+    P: Params + ?Sized,
+  {
+    let abstract_idx: Abstract<P> = detached_to_abstract(self);
+
+    let number: u32 = (abstract_idx.get() & P::ID_MASK_ENTRY) as u32;
+    let serial: u32 = (abstract_idx.get() >> P::ID_MASK_BITS) as u32;
+
+    (number, serial)
+  }
 }
 
 impl Debug for Detached {
@@ -324,6 +338,25 @@ mod tests {
     let bits: usize = Detached::from_bits(data).into_bits();
 
     assert_eq!(data, bits);
+  }
+
+  #[test]
+  fn detached_decompose() {
+    each_capacity!({
+      for generation in 0..3 {
+        let offset: usize = generation * P::LENGTH.as_usize();
+
+        for index in 0..P::LENGTH.as_usize() {
+          let abstract_idx: Abstract<P> = Abstract::new(offset + index);
+          let detached_idx: Detached = Detached::from_abstract(abstract_idx);
+
+          let components: (u32, u32) = detached_idx.decompose::<P>();
+
+          assert_eq!(components.0 as usize, index);
+          assert_eq!(components.1 as usize, generation);
+        }
+      }
+    });
   }
 
   #[test]
