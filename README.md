@@ -5,9 +5,15 @@
 [![docs.rs][shield-img-docs]][shield-url-docs]
 [![build status][shield-img-ci]][shield-url-ci]
 
-Lock-free concurrent table optimized for read-heavy workloads.
+A lock-free concurrent table for Rust.
 
-Inspired by the Erlang/OTP BEAM process table, `ptab` provides a fixed-capacity table where lookup operations perform no shared memory writes - not even reference counts. This enables linear read scalability with CPU count.
+**ptab** provides a fixed-capacity table optimized for read-heavy concurrent workloads. Inspired by Erlang's BEAM process table, lookups scale linearly with CPU count by avoiding all shared memory writes.
+
+## Features
+
+- **Zero-contention reads** - Atomic loads for lock-free lookups.
+- **Cache-line distribution** - Prevents false sharing with no memory overhead.
+- **Generational indices** - Slot reuse mitigates ABA problems.
 
 ## Usage
 
@@ -21,22 +27,26 @@ ptab = "0.1"
 ## Example
 
 ```rust
-let table: ptab::PTab<&str> = ptab::PTab::new();
-let index: ptab::Detached = table.insert("hello").unwrap();
+use ptab::PTab;
+use std::sync::Arc;
 
-assert_eq!(table.read(index), Some("hello"));
-assert!(table.remove(index));
-assert_eq!(table.read(index), None);
+let table = Arc::new(PTab::<&str>::new());
+
+let handle = std::thread::spawn({
+  let table = Arc::clone(&table);
+  move || table.insert("world").unwrap()
+});
+
+let index_a = table.insert("hello").unwrap();
+let index_b = handle.join().unwrap();
+
+assert_eq!(table.read(index_a).unwrap(), "hello");
+assert_eq!(table.read(index_b).unwrap(), "world");
 ```
 
 ## Design
 
-See [`IMPLEMENTATION.md`] for details.
-
-- **Zero-contention reads**: Lookups use only thread-local state and atomic loads
-- **Cache-line aware**: Consecutive allocations distributed across cache lines
-- **Generational indices**: Slot reuse produces different indices (ABA prevention)
-- **Epoch-based reclamation**: Safe memory management via [`sdd`]
+See [`IMPLEMENTATION.md`] for detailed design notes.
 
 <br>
 
@@ -55,7 +65,6 @@ See [`IMPLEMENTATION.md`] for details.
 [//]: # (links)
 
 [`IMPLEMENTATION.md`]: IMPLEMENTATION.md
-[`sdd`]: https://crates.io/crates/sdd
 
 [//]: # (badges)
 
