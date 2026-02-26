@@ -270,10 +270,8 @@ where
 }
 
 // SAFETY:
-// - All internal mutation is performed via atomics.
-// - Memory reclamation is handled through epoch-based reclamation.
-// - Transferring ownership of `Table` between threads is safe provided
-//   `T: Send`, so contained values may be transferred across threads.
+// - `Table` may transfer ownership of entries across threads.
+// - This is only sound if `T: Send`.
 unsafe impl<T, P> Send for Table<T, P>
 where
   T: Send,
@@ -281,14 +279,13 @@ where
 {
 }
 
+
 // SAFETY:
-// - All shared access is mediated through atomic operations.
-// - Methods only yield shared references tied to a `Guard`.
-// - Values may be accessed from multiple threads provided `T: Send`, which is
-//   sufficient because no `&mut T` is ever exposed.
+// - `Table` provides shared access to entries from multiple threads.
+// - This is only sound if `T: Sync`, as multiple shared references may be held.
 unsafe impl<T, P> Sync for Table<T, P>
 where
-  T: Send,
+  T: Sync,
   P: Params + ?Sized,
 {
 }
