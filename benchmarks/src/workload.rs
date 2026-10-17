@@ -9,6 +9,7 @@ use std::time::Instant;
 
 use crate::collect::Collection;
 use crate::collect::Handle;
+use crate::qos;
 
 // -----------------------------------------------------------------------------
 // LCG
@@ -287,7 +288,7 @@ impl Workload {
         let barrier: Arc<Barrier> = Arc::clone(&barrier);
 
         thread::spawn(move || {
-          // qos::set_realtime();
+          qos::set_realtime();
 
           let mut lcg: Lcg = Lcg::new(keys.len());
           let mut val: usize = prefill;
@@ -352,25 +353,5 @@ mod garbage {
     for _ in 0..32 {
       guard.repin();
     }
-  }
-}
-
-// https://developer.apple.com/library/archive/documentation/Performance/Conceptual/EnergyGuide-iOS/PrioritizeWorkWithQoS.html
-#[cfg(target_os = "macos")]
-mod qos {
-  use libc::pthread_set_qos_class_self_np;
-  use libc::qos_class_t::QOS_CLASS_USER_INTERACTIVE;
-
-  #[inline]
-  pub fn set_realtime() -> bool {
-    unsafe { pthread_set_qos_class_self_np(QOS_CLASS_USER_INTERACTIVE, 0) == 0 }
-  }
-}
-
-#[cfg(not(target_os = "macos"))]
-mod qos {
-  #[inline]
-  pub fn set_realtime() -> bool {
-    false
   }
 }

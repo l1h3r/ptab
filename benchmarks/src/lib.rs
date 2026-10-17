@@ -2,6 +2,7 @@
 
 pub mod adapter;
 pub mod collect;
+pub mod qos;
 pub mod workload;
 
 pub use self::collect::Collection;
