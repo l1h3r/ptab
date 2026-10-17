@@ -401,55 +401,57 @@ impl From<Capacity> for usize {
   }
 }
 
+// Most variants are only produced by transmuting a valid power of two.
+#[allow(dead_code)]
 #[derive(Copy, Clone, PartialEq, Eq)]
 #[repr(usize)]
 enum CapacityEnum {
-  _Capacity1Shl4 = 1 << 4,
-  _Capacity1Shl5 = 1 << 5,
-  _Capacity1Shl6 = 1 << 6,
-  _Capacity1Shl7 = 1 << 7,
-  _Capacity1Shl8 = 1 << 8,
-  _Capacity1Shl9 = 1 << 9,
-  _Capacity1Shl10 = 1 << 10,
-  _Capacity1Shl11 = 1 << 11,
-  _Capacity1Shl12 = 1 << 12,
-  _Capacity1Shl13 = 1 << 13,
-  _Capacity1Shl14 = 1 << 14,
-  _Capacity1Shl15 = 1 << 15,
-  _Capacity1Shl16 = 1 << 16,
-  _Capacity1Shl17 = 1 << 17,
-  _Capacity1Shl18 = 1 << 18,
-  _Capacity1Shl19 = 1 << 19,
-  _Capacity1Shl20 = 1 << 20,
-  _Capacity1Shl21 = 1 << 21,
-  _Capacity1Shl22 = 1 << 22,
-  _Capacity1Shl23 = 1 << 23,
-  _Capacity1Shl24 = 1 << 24,
-  _Capacity1Shl25 = 1 << 25,
-  _Capacity1Shl26 = 1 << 26,
-  _Capacity1Shl27 = 1 << 27,
+  Capacity1Shl4 = 1 << 4,
+  Capacity1Shl5 = 1 << 5,
+  Capacity1Shl6 = 1 << 6,
+  Capacity1Shl7 = 1 << 7,
+  Capacity1Shl8 = 1 << 8,
+  Capacity1Shl9 = 1 << 9,
+  Capacity1Shl10 = 1 << 10,
+  Capacity1Shl11 = 1 << 11,
+  Capacity1Shl12 = 1 << 12,
+  Capacity1Shl13 = 1 << 13,
+  Capacity1Shl14 = 1 << 14,
+  Capacity1Shl15 = 1 << 15,
+  Capacity1Shl16 = 1 << 16,
+  Capacity1Shl17 = 1 << 17,
+  Capacity1Shl18 = 1 << 18,
+  Capacity1Shl19 = 1 << 19,
+  Capacity1Shl20 = 1 << 20,
+  Capacity1Shl21 = 1 << 21,
+  Capacity1Shl22 = 1 << 22,
+  Capacity1Shl23 = 1 << 23,
+  Capacity1Shl24 = 1 << 24,
+  Capacity1Shl25 = 1 << 25,
+  Capacity1Shl26 = 1 << 26,
+  Capacity1Shl27 = 1 << 27,
 }
 
 impl CapacityEnum {
-  const MIN: Self = Self::_Capacity1Shl4;
+  const MIN: Self = Self::Capacity1Shl4;
 
   #[cfg(miri)]
-  const MAX: Self = Self::_Capacity1Shl10;
+  const MAX: Self = Self::Capacity1Shl10;
 
   #[cfg(all(not(miri), test, not(feature = "slow")))]
-  const MAX: Self = Self::_Capacity1Shl16;
+  const MAX: Self = Self::Capacity1Shl16;
 
   #[cfg(not(any(miri, all(test, not(feature = "slow")))))]
-  const MAX: Self = Self::_Capacity1Shl27;
+  const MAX: Self = Self::Capacity1Shl27;
 
   #[cfg(miri)]
-  const DEF: Self = Self::_Capacity1Shl5;
+  const DEF: Self = Self::Capacity1Shl5;
 
   #[cfg(all(not(miri), test, not(feature = "slow")))]
-  const DEF: Self = Self::_Capacity1Shl10;
+  const DEF: Self = Self::Capacity1Shl10;
 
   #[cfg(not(any(miri, all(test, not(feature = "slow")))))]
-  const DEF: Self = Self::_Capacity1Shl20;
+  const DEF: Self = Self::Capacity1Shl20;
 }
 
 // -----------------------------------------------------------------------------

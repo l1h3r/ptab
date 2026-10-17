@@ -6,7 +6,6 @@ categories = ["concurrency", "data-structures", "memory-management"]
 description = "Lock-free concurrent table optimized for read-heavy workloads"
 documentation = "https://docs.rs/ptab"
 edition = "2024"
-homepage = "https://github.com/l1h3r/ptab"
 keywords = ["atomic", "concurrent", "lock-free"]
 license = "MIT OR Apache-2.0"
 readme = "README.md"
