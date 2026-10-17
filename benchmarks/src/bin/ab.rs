@@ -34,8 +34,8 @@ const BAND_SINGLE: f64 = 0.02;
 /// Allowed ratio band for multi-thread rows.
 const BAND_MULTI: f64 = 0.05;
 
-/// Performance cores on the reference machine. Rows with more threads are reported as noisy.
-const PCORES: usize = 8;
+/// Performance cores assumed when the machine does not report them.
+const PCORES_FALLBACK: usize = 8;
 
 /// Nominal coverage of each reported interval.
 const CONFIDENCE: f64 = 0.95;
@@ -164,6 +164,9 @@ fn resolve_source(
   if dir.exists() {
     return Ok(Some(dir));
   }
+
+  // A worktree left behind by a killed run is registered but gone from disk; forget it first.
+  let _ = git(root, &["worktree", "prune"]);
 
   // A worktree needs write access to `.git`; `git archive` is the fallback when it is refused.
   match git(
@@ -399,6 +402,20 @@ struct Stat {
   hi: f64,
 }
 
+/// The rank `k` that `summarize` uses for `n` samples: the largest with coverage at the target,
+/// or 1 (the full range) when none reaches it.
+fn rank(n: usize) -> usize {
+  (1..=n / 2)
+    .rev()
+    .find(|&k| coverage(n, k) >= CONFIDENCE)
+    .unwrap_or(1)
+}
+
+/// Actual coverage of the interval `summarize` returns for `n` samples.
+fn interval_coverage(n: usize) -> f64 {
+  coverage(n, rank(n)).max(0.0)
+}
+
 /// Median and the widest order-statistic interval whose coverage reaches `CONFIDENCE`. With few
 /// rounds the interval is the full range, and its coverage is stated by `coverage`.
 fn summarize(mut values: Vec<f64>) -> Stat {
@@ -411,13 +428,7 @@ fn summarize(mut values: Vec<f64>) -> Stat {
     (values[n / 2 - 1] + values[n / 2]) / 2.0
   };
 
-  let mut best: usize = 1;
-
-  for k in 1..=n / 2 {
-    if coverage(n, k) >= CONFIDENCE {
-      best = k;
-    }
-  }
+  let best: usize = rank(n);
 
   Stat {
     lo: values[best - 1],
@@ -457,6 +468,27 @@ impl Verdict {
   }
 }
 
+/// Performance-core count: `hw.perflevel0.physicalcpu` on Apple silicon, else the available
+/// parallelism, else `PCORES_FALLBACK`. Rows with more threads are reported as noisy.
+fn pcores() -> usize {
+  let sysctl = Command::new("sysctl")
+    .args(["-n", "hw.perflevel0.physicalcpu"])
+    .output()
+    .ok()
+    .filter(|out| out.status.success())
+    .and_then(|out| {
+      String::from_utf8_lossy(&out.stdout)
+        .trim()
+        .parse::<usize>()
+        .ok()
+    });
+
+  sysctl
+    .or_else(|| std::thread::available_parallelism().ok().map(usize::from))
+    .filter(|&count| count > 0)
+    .unwrap_or(PCORES_FALLBACK)
+}
+
 /// The band for a row: single-thread rows are tighter than multi-thread rows.
 fn band_for(threads: usize) -> f64 {
   if threads == 1 {
@@ -467,8 +499,8 @@ fn band_for(threads: usize) -> f64 {
 }
 
 /// Classifies a row's ratio interval against its band.
-fn verdict(threads: usize, ratio: Stat) -> Verdict {
-  if threads > PCORES {
+fn verdict(threads: usize, pcores: usize, ratio: Stat) -> Verdict {
+  if threads > pcores {
     return Verdict::Noisy;
   }
 
@@ -535,6 +567,8 @@ fn run(opts: &Options) -> Result<bool, String> {
 
   let (cells, qos_ok, qos_total) = result?;
 
+  let pcores: usize = pcores();
+
   let stats: Vec<(String, usize, Stat, Stat, Stat, Verdict)> = cells
     .into_iter()
     .map(|((name, threads), cell)| {
@@ -548,13 +582,14 @@ fn run(opts: &Options) -> Result<bool, String> {
       let base: Stat = summarize(cell.base);
       let cand: Stat = summarize(cell.cand);
       let ratio: Stat = summarize(ratios);
-      let verdict: Verdict = verdict(threads, ratio);
+      let verdict: Verdict = verdict(threads, pcores, ratio);
 
       (name, threads, base, cand, ratio, verdict)
     })
     .collect();
 
   let mut table: String = String::new();
+  let covers: f64 = interval_coverage(opts.rounds) * 100.0;
 
   let _ = writeln!(
     table,
@@ -564,6 +599,18 @@ fn run(opts: &Options) -> Result<bool, String> {
     opts.cand,
     BAND_SINGLE * 100.0,
     BAND_MULTI * 100.0,
+  );
+
+  let _ = writeln!(
+    table,
+    "intervals are order statistics of {} rounds and cover the median {covers:.1}% of the time (target {:.0}%){}; more than {pcores} threads is noisy",
+    opts.rounds,
+    CONFIDENCE * 100.0,
+    if covers / 100.0 < CONFIDENCE {
+      ": BELOW TARGET, use more rounds to trust a verdict"
+    } else {
+      ""
+    },
   );
 
   let _ = writeln!(
@@ -693,7 +740,10 @@ fn cleanup(root: &Path, created: Vec<Created>) {
   for item in created {
     match item {
       Created::Worktree(dir) => {
-        if let Err(err) = git(root, &["worktree", "remove", &dir.to_string_lossy()]) {
+        if let Err(err) = git(
+          root,
+          &["worktree", "remove", "--force", &dir.to_string_lossy()],
+        ) {
           eprintln!("ab: could not remove worktree {}: {err}", dir.display());
         }
       }
@@ -725,5 +775,67 @@ fn main() -> ExitCode {
       eprintln!("ab: {err}");
       ExitCode::from(2)
     }
+  }
+}
+
+#[cfg(test)]
+mod tests {
+  use super::*;
+
+  fn stat(lo: f64, hi: f64) -> Stat {
+    Stat {
+      lo,
+      med: (lo + hi) / 2.0,
+      hi,
+    }
+  }
+
+  #[test]
+  fn coverage_matches_the_binomial() {
+    // n = 3: [min, max] holds the median with probability 1 - 2/8.
+    assert!((coverage(3, 1) - 0.75).abs() < 1e-12);
+    // n = 10: P(Bin <= 0) = 1/1024, P(Bin <= 1) = 11/1024, P(Bin <= 2) = 56/1024.
+    assert!((coverage(10, 1) - (1.0 - 2.0 / 1024.0)).abs() < 1e-12);
+    assert!((coverage(10, 2) - (1.0 - 22.0 / 1024.0)).abs() < 1e-12);
+    assert!((coverage(10, 3) - (1.0 - 112.0 / 1024.0)).abs() < 1e-12);
+  }
+
+  #[test]
+  fn rank_picks_the_narrowest_interval_that_reaches_the_target() {
+    assert_eq!(rank(10), 2);
+    assert_eq!(rank(3), 1);
+    assert!(interval_coverage(3) < CONFIDENCE);
+    assert!(interval_coverage(10) >= CONFIDENCE);
+  }
+
+  #[test]
+  fn summarize_uses_the_rank_indices() {
+    let stat = summarize((1..=10).map(f64::from).rev().collect());
+    assert_eq!((stat.lo, stat.med, stat.hi), (2.0, 5.5, 9.0));
+
+    let stat = summarize(vec![3.0, 1.0, 2.0]);
+    assert_eq!((stat.lo, stat.med, stat.hi), (1.0, 2.0, 3.0));
+  }
+
+  #[test]
+  fn verdict_fails_only_when_the_interval_is_outside_the_band() {
+    // Single thread, band 2%.
+    assert!(matches!(
+      verdict(1, 8, stat(1.03, 1.06)),
+      Verdict::Change { slower: true }
+    ));
+    assert!(matches!(
+      verdict(1, 8, stat(0.90, 0.97)),
+      Verdict::Change { slower: false }
+    ));
+    // Straddles the band edge: no change claimed.
+    assert!(matches!(verdict(1, 8, stat(1.01, 1.06)), Verdict::Cannot));
+    assert!(matches!(
+      verdict(1, 8, stat(0.995, 1.005)),
+      Verdict::Resolves
+    ));
+    // Multi-thread band is 5%, and more threads than P-cores is never gated.
+    assert!(matches!(verdict(4, 8, stat(1.03, 1.04)), Verdict::Resolves));
+    assert!(matches!(verdict(12, 8, stat(2.0, 3.0)), Verdict::Noisy));
   }
 }
