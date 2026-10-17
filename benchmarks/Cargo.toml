@@ -36,3 +36,7 @@ harness = false
 [[bench]]
 name = "workload"
 harness = false
+
+[[bench]]
+name = "ab"
+harness = false
