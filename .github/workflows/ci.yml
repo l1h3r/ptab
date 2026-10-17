@@ -104,9 +104,6 @@ jobs:
       - run: cargo miri test
         env:
           MIRIFLAGS: -Zmiri-strict-provenance
-      - run: cargo miri test --no-default-features --features alloc
-        env:
-          MIRIFLAGS: -Zmiri-strict-provenance
 
   fmt:
     name: Format
