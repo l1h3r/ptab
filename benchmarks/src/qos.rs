@@ -65,6 +65,22 @@ mod imp {
 pub use self::imp::current;
 pub use self::imp::set_realtime;
 
+/// Pins the calling thread the first time it is called, and does nothing after that.
+///
+/// Thread pools that create their workers without a QoS attribute (divan's, for one) leave
+/// them at `DEFAULT`, so each benchmark closure calls this on the thread that runs it.
+pub fn pin_once() {
+  thread_local! {
+    static PINNED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+  }
+
+  PINNED.with(|pinned| {
+    if !pinned.replace(true) {
+      set_realtime();
+    }
+  });
+}
+
 #[cfg(all(test, target_os = "macos"))]
 mod tests {
   use super::*;
