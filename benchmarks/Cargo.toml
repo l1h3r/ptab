@@ -1,0 +1,42 @@
+[package]
+name = "ptab-benchmarks"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[dependencies]
+libc = { version = "0.2", default-features = false }
+parking_lot = { version = "0.12", default-features = false }
+
+crossbeam-epoch = { version = "0.9", default-features = false, features = ["std"] }
+sdd = { version = "4.7", default-features = false }
+
+dashmap = { version = "6.1", default-features = false }
+flurry = { version = "0.5", default-features = false }
+generational-arena = { version = "0.2", default-features = false, features = ["std"] }
+idr-ebr = { version = "0.3", default-features = false }
+papaya = { version = "0.2", default-features = false }
+ptab = { version = "0.1.7", default-features = false, features = ["sdd"] }
+sharded-slab = { version = "0.1", default-features = false }
+slab = { version = "0.4", default-features = false, features = ["std"] }
+slotmap = { version = "1.1", default-features = false, features = ["std"] }
+thunderdome = { version = "0.6", default-features = false, features = ["std"] }
+
+[dev-dependencies]
+divan = { version = "0.1", default-features = false, features = ["wrap_help"] }
+mimalloc = { version = "0.1", default-features = false, features = ["v3"] }
+
+[features]
+slow = []
+
+[[bench]]
+name = "compare"
+harness = false
+
+[[bench]]
+name = "workload"
+harness = false
+
+[[bench]]
+name = "ab"
+harness = false
