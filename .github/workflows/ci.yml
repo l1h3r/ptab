@@ -104,12 +104,38 @@ jobs:
       - run: cargo miri test
         env:
           MIRIFLAGS: -Zmiri-strict-provenance
+      - run: cargo miri test --no-default-features --features alloc
+        env:
+          MIRIFLAGS: -Zmiri-strict-provenance
+
+  fmt:
+    name: Format
+    needs: pre_ci
+    if: needs.pre_ci.outputs.continue
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+      - run: cargo fmt --check
+
+  alloc:
+    name: Alloc
+    needs: pre_ci
+    if: needs.pre_ci.outputs.continue
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@stable
+      - run: cargo build --no-default-features --features alloc
 
   clippy:
     name: Clippy
     runs-on: ubuntu-latest
     timeout-minutes: 45
-    if: github.event_name != 'pull_request'
     steps:
       - uses: actions/checkout@v6
       - uses: dtolnay/rust-toolchain@clippy
