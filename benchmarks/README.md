@@ -29,8 +29,8 @@ SPEC is `crates`, `tree` or `git:REV`. A `git:REV` side is a detached worktree u
 Each row prints the median ns/op of each side with a 95% interval, and the ratio of candidate to
 baseline with its interval and half-width. A row reports a change only when its ratio interval lies
 entirely outside 1 +/- band: 2% for single-thread rows, 5% for multi-thread rows. Each row also says
-whether its half-width is narrower than its band ("resolves" or "cannot resolve"). Rows with more
-than 8 threads (the P-core count here) are reported as noisy and not gated. Multi-thread cells
+whether its half-width is narrower than its band ("resolves" or "cannot resolve"). Rows with as many
+threads as the machine has P-cores, or more, are reported as noisy and not gated. Multi-thread cells
 respawn their workers between repetitions, so one process samples several thread placements. Raw
 samples go to `target/scratch/ab-<time>.tsv`.
 

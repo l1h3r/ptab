@@ -469,7 +469,8 @@ impl Verdict {
 }
 
 /// Performance-core count: `hw.perflevel0.physicalcpu` on Apple silicon, else the available
-/// parallelism, else `PCORES_FALLBACK`. Rows with more threads are reported as noisy.
+/// parallelism, else `PCORES_FALLBACK`. Rows with this many threads or more are reported as noisy,
+/// since the main thread and the system also need a core.
 fn pcores() -> usize {
   let sysctl = Command::new("sysctl")
     .args(["-n", "hw.perflevel0.physicalcpu"])
@@ -500,7 +501,7 @@ fn band_for(threads: usize) -> f64 {
 
 /// Classifies a row's ratio interval against its band.
 fn verdict(threads: usize, pcores: usize, ratio: Stat) -> Verdict {
-  if threads > pcores {
+  if threads >= pcores {
     return Verdict::Noisy;
   }
 
@@ -603,7 +604,7 @@ fn run(opts: &Options) -> Result<bool, String> {
 
   let _ = writeln!(
     table,
-    "intervals are order statistics of {} rounds and cover the median {covers:.1}% of the time (target {:.0}%){}; more than {pcores} threads is noisy",
+    "intervals are order statistics of {} rounds and cover the median {covers:.1}% of the time (target {:.0}%){}; {pcores} or more threads is noisy",
     opts.rounds,
     CONFIDENCE * 100.0,
     if covers / 100.0 < CONFIDENCE {
@@ -837,6 +838,7 @@ mod tests {
     ));
     // Multi-thread band is 5%, and more threads than P-cores is never gated.
     assert!(matches!(verdict(4, 8, stat(1.03, 1.04)), Verdict::Resolves));
+    assert!(matches!(verdict(8, 8, stat(2.0, 3.0)), Verdict::Noisy));
     assert!(matches!(verdict(12, 8, stat(2.0, 3.0)), Verdict::Noisy));
   }
 }
