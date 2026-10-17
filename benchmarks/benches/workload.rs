@@ -81,6 +81,5 @@ fn main() {
   // run!("idr", Idr<usize>);
   // run!("papaya", Papaya<usize>);
   run!("ptab", PTab<usize>);
-  run!("ptab_develop", PTabDevelop<usize>);
   // run!("sharded_slab", ShardedSlab<usize>);
 }

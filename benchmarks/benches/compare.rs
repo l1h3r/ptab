@@ -115,7 +115,6 @@ mod read_seq_local {
     // slotmap as SlotMap<usize>,
     // thunderdome as Thunderdome<usize>,
     ptab as PTab<usize>,
-    ptab_develop as PTabDevelop<usize>,
   }
 }
 
@@ -147,7 +146,6 @@ mod read_seq_multi {
     // ptab as PTab<usize>,
     // sharded_slab as ShardedSlab<usize>,
     ptab as PTab<usize>,
-    ptab_develop as PTabDevelop<usize>,
   }
 }
 
@@ -179,7 +177,6 @@ mod read_hot_multi {
     // ptab as PTab<usize>,
     // sharded_slab as ShardedSlab<usize>,
     ptab as PTab<usize>,
-    ptab_develop as PTabDevelop<usize>,
   }
 }
 
@@ -212,7 +209,6 @@ mod insert_seq_local {
     // slotmap as SlotMap<usize>,
     // thunderdome as Thunderdome<usize>,
     ptab as PTab<usize>,
-    ptab_develop as PTabDevelop<usize>,
   }
 }
 
@@ -244,7 +240,6 @@ mod insert_seq_multi {
     // ptab as PTab<usize>,
     // sharded_slab as ShardedSlab<usize>,
     ptab as PTab<usize>,
-    ptab_develop as PTabDevelop<usize>,
   }
 }
 
@@ -277,7 +272,6 @@ mod churn_local {
     // slotmap as SlotMap<usize>,
     // thunderdome as Thunderdome<usize>,
     ptab as PTab<usize>,
-    ptab_develop as PTabDevelop<usize>,
   }
 }
 
@@ -309,7 +303,6 @@ mod churn_multi {
     // ptab as PTab<usize>,
     // sharded_slab as ShardedSlab<usize>,
     ptab as PTab<usize>,
-    ptab_develop as PTabDevelop<usize>,
   }
 }
 
@@ -346,7 +339,6 @@ mod drop {
   benches! {
     local;
     ptab as PTab<DropMe>,
-    ptab_develop as PTabDevelop<DropMe>,
     // generational_arena as GenerationalArena<DropMe>,
     // idr as Idr<DropMe>,
     // ptab as PTab<DropMe>,
