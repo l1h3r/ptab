@@ -84,17 +84,27 @@ pub trait Params {
 /// println!("{:#?}", <ConstParams<1024> as ParamsExt>::debug());
 /// ```
 pub trait ParamsExt: Params + Sealed {
+  /// The number of cache-line blocks the table occupies.
   const BLOCKS: NonZeroUsize = derive_blocks::<Self>();
+  /// The memory layout of the table allocation.
   const LAYOUT: Layout = derive_layout::<Self>();
+  /// The size of the table allocation in bytes.
   const MEMORY: usize = Self::BLOCKS.get().strict_mul(CACHE_LINE);
 
+  /// The number of bits needed to address every entry.
   const ID_MASK_BITS: u32 = Self::LENGTH.log2();
+  /// The mask selecting the entry bits of an index.
   const ID_MASK_ENTRY: usize = 1_usize.strict_shl(Self::ID_MASK_BITS).strict_sub(1);
+  /// The mask selecting the block bits of an index.
   const ID_MASK_BLOCK: usize = Self::BLOCKS.get().strict_sub(1);
+  /// The mask selecting the slot bits within a block.
   const ID_MASK_INDEX: usize = CACHE_LINE_SLOTS.strict_sub(1);
+  /// The shift that places the block bits of an index.
   const ID_SHIFT_BLOCK: u32 = Self::ID_MASK_INDEX.trailing_ones();
+  /// The shift that places the slot bits of an index.
   const ID_SHIFT_INDEX: u32 = Self::ID_MASK_BLOCK.trailing_ones();
 
+  /// Returns a value that prints the derived parameters.
   #[inline]
   fn debug() -> DebugParams<Self> {
     DebugParams {
@@ -102,11 +112,13 @@ pub trait ParamsExt: Params + Sealed {
     }
   }
 
+  /// Returns a guard from the configured collector.
   #[inline]
   fn guard() -> <Self::Collector as CollectorWeak>::Guard {
     <Self::Collector as CollectorWeak>::guard()
   }
 
+  /// Flushes the configured collector.
   #[inline]
   fn flush() {
     <Self::Collector as CollectorWeak>::flush();

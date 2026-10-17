@@ -1,14 +1,16 @@
+//! Loom and shuttle model tests.
+
 #![cfg(any(loom, shuttle))]
 
 mod model {
   #[cfg(loom)]
   mod export {
-    pub use ::loom::sync::Arc;
-    pub use ::loom::thread;
-    pub use ::loom::thread::JoinHandle;
+    pub(crate) use ::loom::sync::Arc;
+    pub(crate) use ::loom::thread;
+    pub(crate) use ::loom::thread::JoinHandle;
 
     #[inline]
-    pub fn check<F>(f: F)
+    pub(crate) fn check<F>(f: F)
     where
       F: Fn() + Sync + Send + 'static,
     {
@@ -18,14 +20,14 @@ mod model {
 
   #[cfg(shuttle)]
   mod export {
-    pub use ::shuttle::sync::Arc;
-    pub use ::shuttle::thread;
-    pub use ::shuttle::thread::JoinHandle;
+    pub(crate) use ::shuttle::sync::Arc;
+    pub(crate) use ::shuttle::thread;
+    pub(crate) use ::shuttle::thread::JoinHandle;
 
     const ITERATIONS: usize = 100_000;
 
     #[inline]
-    pub fn check<F>(f: F)
+    pub(crate) fn check<F>(f: F)
     where
       F: Fn() + Sync + Send + 'static,
     {
@@ -33,7 +35,7 @@ mod model {
     }
   }
 
-  pub use self::export::*;
+  pub(crate) use self::export::*;
 }
 
 use self::model::Arc;
