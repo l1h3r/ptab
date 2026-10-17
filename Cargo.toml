@@ -34,10 +34,10 @@ loom = { version = "0.7", default-features = false, optional = true }
 loom = { version = "0.7", default-features = false }
 
 [target."cfg(shuttle)".dependencies]
-shuttle = { version = "0.8", default-features = false, optional = true }
+shuttle = { version = "0.9", default-features = false, optional = true }
 
 [target."cfg(shuttle)".dev-dependencies]
-shuttle = { version = "0.8", default-features = false }
+shuttle = { version = "0.9", default-features = false }
 
 [features]
 default = ["sdd"]
