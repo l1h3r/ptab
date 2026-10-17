@@ -735,7 +735,8 @@ fn interleave(opts: &Options, scratch: &Path, base: &Path, cand: &Path) -> Resul
   Ok((cells, qos_ok, qos_total))
 }
 
-/// Removes what this run created. Worktrees go through plain `git worktree remove`.
+/// Removes what this run created. Worktrees are this run's own detached checkouts under
+/// `target/scratch/`, so `--force` only discards build output there.
 fn cleanup(root: &Path, created: Vec<Created>) {
   for item in created {
     match item {
