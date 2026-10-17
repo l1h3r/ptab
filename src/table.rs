@@ -507,7 +507,7 @@ where
     Self {
       array: table.readonly.data.as_non_null(),
       guard,
-      total: table.cap(),
+      total: P::LENGTH.as_usize(),
       index: 0,
       table: PhantomData,
     }
@@ -1098,6 +1098,51 @@ mod tests {
     for (init_key, iter_key) in keys.into_iter().zip(table.weak_keys(DefParams::guard())) {
       assert_eq!(init_key, iter_key);
     }
+  }
+
+  // Scenario: A live entry sits in the last position at `Capacity::MAX`, which
+  // `cap()` excludes. The slot is written directly because filling the table
+  // is slow.
+  // Expected: `weak_keys` yields the entry, as `Debug` does.
+  #[test]
+  fn weak_keys_last_slot() {
+    let table: Table<usize, MaxParams> = Table::new();
+    let index: Abstract<MaxParams> = Abstract::new(MaxParams::LENGTH.as_usize() - 1);
+    let concrete: Concrete<MaxParams> = Concrete::from_abstract(index);
+
+    table
+      .readonly
+      .data
+      .get(concrete)
+      .write(Ordering::Release, |entry| {
+        entry.write(7);
+      });
+
+    assert_eq!(table.weak_keys(MaxParams::guard()).count(), 1);
+
+    // Count the entry so `Drop` frees it; `Array` does not drop elements.
+    table.volatile.incr_entries();
+  }
+
+  // Scenario: A full `Capacity::MAX` table has one remove and one reinsert.
+  // Expected: `weak_keys` yields exactly `len` keys.
+  #[cfg(feature = "slow")]
+  #[test]
+  fn weak_keys_full_max() {
+    let table: Table<(), MaxParams> = Table::new();
+    let first: Detached = table.insert(()).unwrap();
+
+    for _ in 1..table.cap() {
+      table.insert(()).unwrap();
+    }
+
+    assert!(table.remove(first));
+    table.insert(()).unwrap();
+
+    assert_eq!(
+      table.weak_keys(MaxParams::guard()).count(),
+      table.len() as usize
+    );
   }
 
   #[test]
