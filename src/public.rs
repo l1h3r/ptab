@@ -47,6 +47,30 @@ pub use crate::table::WeakKeys;
 /// assert_eq!(table.capacity(), 256);
 /// ```
 ///
+/// Sharing the table across threads moves values between them, so `PTab` is
+/// `Sync` only when `T` is both `Send` and `Sync`. A `MutexGuard` is `Sync` but
+/// not `Send`, so it can't be removed from another thread:
+///
+/// ```compile_fail,E0277
+/// use std::sync::Mutex;
+/// use std::sync::MutexGuard;
+/// use std::thread;
+///
+/// use ptab::ConstParams;
+/// use ptab::PTab;
+///
+/// static M: Mutex<u32> = Mutex::new(0);
+///
+/// let table: PTab<MutexGuard<'static, u32>, ConstParams<16>> = PTab::new();
+/// let idx = table.insert(M.lock().unwrap()).unwrap();
+///
+/// thread::scope(|s| {
+///   s.spawn(|| {
+///     table.remove(idx);
+///   });
+/// });
+/// ```
+///
 /// [crate-level documentation]: crate
 /// [`Detached`]: crate::index::Detached
 /// [`ConstParams`]: crate::params::ConstParams
@@ -354,5 +378,17 @@ where
   #[inline]
   fn default() -> Self {
     Self::new()
+  }
+}
+
+#[cfg(test)]
+mod tests {
+  use super::PTab;
+
+  fn assert_sync<T: Send + Sync>() {}
+
+  #[test]
+  fn ptab_string_is_send_and_sync() {
+    assert_sync::<PTab<String>>();
   }
 }
