@@ -1119,6 +1119,9 @@ mod tests {
       });
 
     assert_eq!(table.weak_keys(MaxParams::guard()).count(), 1);
+
+    // Count the entry so `Drop` frees it; `Array` does not drop elements.
+    table.volatile.incr_entries();
   }
 
   // Scenario: A full `Capacity::MAX` table has one remove and one reinsert.
