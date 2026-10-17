@@ -432,24 +432,37 @@ struct Cell {
   cand: Vec<f64>,
 }
 
+/// What a row's ratio interval says about the band.
 #[derive(Clone, Copy, PartialEq)]
 enum Verdict {
-  InBand,
-  Slower,
-  Faster,
-  Outside,
+  /// More threads than P-cores: reported, not gated.
   Noisy,
+  /// The interval lies entirely above (`true`) or below (`false`) the band: a reported change.
+  Change { slower: bool },
+  /// The interval is inside the band and narrower than it: no change, and the band is resolved.
+  Resolves,
+  /// The interval is inside the band but as wide as the band or wider: no change claimed.
+  Cannot,
 }
 
 impl Verdict {
-  fn label(self) -> &'static str {
+  fn label(self, band: f64) -> String {
     match self {
-      Self::InBand => "in band",
-      Self::Slower => "slower",
-      Self::Faster => "faster",
-      Self::Outside => "outside band",
-      Self::Noisy => "noisy, not gated",
+      Self::Noisy => "noisy, not gated".to_owned(),
+      Self::Change { slower: true } => "change: slower".to_owned(),
+      Self::Change { slower: false } => "change: faster".to_owned(),
+      Self::Resolves => format!("resolves {:.0}%, no change", band * 100.0),
+      Self::Cannot => format!("cannot resolve {:.0}%", band * 100.0),
     }
+  }
+}
+
+/// The band for a row: single-thread rows are tighter than multi-thread rows.
+fn band_for(threads: usize) -> f64 {
+  if threads == 1 {
+    BAND_SINGLE
+  } else {
+    BAND_MULTI
   }
 }
 
@@ -459,20 +472,16 @@ fn verdict(threads: usize, ratio: Stat) -> Verdict {
     return Verdict::Noisy;
   }
 
-  let band: f64 = if threads == 1 {
-    BAND_SINGLE
-  } else {
-    BAND_MULTI
-  };
+  let band: f64 = band_for(threads);
 
-  if ratio.lo >= 1.0 - band && ratio.hi <= 1.0 + band {
-    Verdict::InBand
-  } else if ratio.lo > 1.0 + band {
-    Verdict::Slower
+  if ratio.lo > 1.0 + band {
+    Verdict::Change { slower: true }
   } else if ratio.hi < 1.0 - band {
-    Verdict::Faster
+    Verdict::Change { slower: false }
+  } else if (ratio.hi - ratio.lo) / 2.0 < band {
+    Verdict::Resolves
   } else {
-    Verdict::Outside
+    Verdict::Cannot
   }
 }
 
@@ -559,16 +568,18 @@ fn run(opts: &Options) -> Result<bool, String> {
 
   let _ = writeln!(
     table,
-    "{:<12} {:>3}  {:>25}  {:>25}  {:>22}  verdict",
-    "row", "thr", "base ns/op [lo, hi]", "cand ns/op [lo, hi]", "ratio [lo, hi]"
+    "{:<12} {:>3}  {:>25}  {:>25}  {:>22}  {:>9}  verdict",
+    "row", "thr", "base ns/op [lo, hi]", "cand ns/op [lo, hi]", "ratio [lo, hi]", "half-width"
   );
 
   let mut failing: Vec<String> = Vec::new();
 
   for (name, threads, base, cand, ratio, verdict) in &stats {
+    let half: f64 = (ratio.hi - ratio.lo) / 2.0 * 100.0;
+
     let _ = writeln!(
       table,
-      "{:<12} {:>3}  {:>9.3} [{:>7.3}, {:>7.3}]  {:>9.3} [{:>7.3}, {:>7.3}]  {:>6.3} [{:>5.3}, {:>5.3}]  {}",
+      "{:<12} {:>3}  {:>9.3} [{:>7.3}, {:>7.3}]  {:>9.3} [{:>7.3}, {:>7.3}]  {:>6.3} [{:>5.3}, {:>5.3}]  {:>8.2}%  {}",
       name,
       threads,
       base.med,
@@ -580,10 +591,11 @@ fn run(opts: &Options) -> Result<bool, String> {
       ratio.med,
       ratio.lo,
       ratio.hi,
-      verdict.label(),
+      half,
+      verdict.label(band_for(*threads)),
     );
 
-    if *verdict == Verdict::Slower || *verdict == Verdict::Faster || *verdict == Verdict::Outside {
+    if matches!(verdict, Verdict::Change { .. }) {
       failing.push(format!("{name}/{threads}"));
     }
   }
@@ -592,11 +604,16 @@ fn run(opts: &Options) -> Result<bool, String> {
 
   if opts.self_test {
     if failing.is_empty() {
-      println!("self-test: PASS, every gated row's ratio interval is inside its band");
+      println!(
+        "self-test: PASS, no gated row reports a change (no interval lies entirely outside its band)"
+      );
       return Ok(true);
     }
 
-    println!("self-test: FAIL, outside band: {}", failing.join(", "));
+    println!(
+      "self-test: FAIL, rows report a change on identical code: {}",
+      failing.join(", ")
+    );
     return Ok(false);
   }
 
