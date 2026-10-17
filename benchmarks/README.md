@@ -27,11 +27,14 @@ SPEC is `crates`, `tree` or `git:REV`. A `git:REV` side is a detached worktree u
 `target/scratch/ws-*`, so the tree's `Cargo.lock` is never touched.
 
 Each row prints the median ns/op of each side with a 95% interval, and the ratio of candidate to
-baseline with its interval. Rows with 1 thread are gated at 2%, multi-thread rows at 5%. Rows with
-more than 8 threads (the P-core count here) are reported as noisy and not gated. A change counts
-only when its ratio interval clears the band. Raw samples go to `target/scratch/ab-<time>.tsv`.
+baseline with its interval and half-width. A row reports a change only when its ratio interval lies
+entirely outside 1 +/- band: 2% for single-thread rows, 5% for multi-thread rows. Each row also says
+whether its half-width is narrower than its band ("resolves" or "cannot resolve"). Rows with more
+than 8 threads (the P-core count here) are reported as noisy and not gated. Multi-thread cells
+respawn their workers between repetitions, so one process samples several thread placements. Raw
+samples go to `target/scratch/ab-<time>.tsv`.
 
-`--self-test` exits 1 when any gated row's ratio interval leaves its band.
+`--self-test` exits 1 when any gated row reports a change on identical code.
 
 ### Quiet machine
 
