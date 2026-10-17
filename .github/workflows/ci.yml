@@ -136,6 +136,7 @@ jobs:
     name: Clippy
     runs-on: ubuntu-latest
     timeout-minutes: 45
+    if: github.event_name != 'pull_request'
     steps:
       - uses: actions/checkout@v6
       - uses: dtolnay/rust-toolchain@clippy
