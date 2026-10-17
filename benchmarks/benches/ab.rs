@@ -32,9 +32,18 @@ const TOTAL: usize = 1 << 19;
 const FULL_THREADS: &[usize] = &[2, 4, 6, 8, 12];
 const QUICK_THREADS: &[usize] = &[6];
 
-const FULL_BUDGET: Duration = Duration::from_millis(1000);
+const FULL_BUDGET: Duration = Duration::from_millis(800);
 const QUICK_BUDGET: Duration = Duration::from_millis(2000);
-const MIN_SAMPLES: usize = 9;
+const FULL_REPS: usize = 4;
+const QUICK_REPS: usize = 2;
+const MIN_SAMPLES: usize = 1;
+
+/// Per-cell settings. `reps` is the number of respawned pools a multi-thread cell runs.
+#[derive(Clone, Copy)]
+struct Config {
+  budget: Duration,
+  reps: usize,
+}
 
 // -----------------------------------------------------------------------------
 // Workers
@@ -43,6 +52,7 @@ const MIN_SAMPLES: usize = 9;
 type Job = Arc<dyn Fn(usize) + Send + Sync>;
 
 struct Shared {
+  ready: AtomicUsize,
   generation: AtomicUsize,
   finished: AtomicUsize,
   stop: AtomicBool,
@@ -66,6 +76,7 @@ fn spin_until(mut cond: impl FnMut() -> bool) {
 
 fn worker(shared: Arc<Shared>, id: usize) {
   qos::set_realtime();
+  shared.ready.fetch_add(1, Ordering::Release);
 
   let mut seen: usize = 0;
 
@@ -100,6 +111,7 @@ struct Pool {
 impl Pool {
   fn new(threads: usize) -> Self {
     let shared: Arc<Shared> = Arc::new(Shared {
+      ready: AtomicUsize::new(0),
       generation: AtomicUsize::new(0),
       finished: AtomicUsize::new(0),
       stop: AtomicBool::new(false),
@@ -112,6 +124,9 @@ impl Pool {
         thread::spawn(move || worker(shared, id))
       })
       .collect();
+
+    // Wait until every worker has pinned itself, so no pinning or spawn cost lands in a timed run.
+    spin_until(|| shared.ready.load(Ordering::Acquire) == threads);
 
     Self {
       threads,
@@ -160,33 +175,64 @@ fn measure(budget: Duration, ops: usize, mut sample: impl FnMut() -> Duration) -
     values.push(sample().as_nanos() as f64 / ops as f64);
   }
 
+  let count: usize = values.len();
+
+  (median(&mut values), count)
+}
+
+/// Median of `values`, which it sorts.
+fn median(values: &mut [f64]) -> f64 {
   values.sort_by(f64::total_cmp);
 
   let count: usize = values.len();
-  let median: f64 = if count % 2 == 1 {
+
+  if count % 2 == 1 {
     values[count / 2]
   } else {
     (values[count / 2 - 1] + values[count / 2]) / 2.0
-  };
+  }
+}
 
-  (median, count)
+/// Runs `sample` over `cfg.reps` repetitions. Each repetition spawns and pins a fresh pool, so
+/// one process samples several thread placements; single-thread cells run once. Returns the
+/// median of the repetition medians and the total sample count.
+fn repeated(
+  threads: usize,
+  cfg: Config,
+  ops: usize,
+  mut sample: impl FnMut(&Pool) -> Duration,
+) -> (f64, usize) {
+  let reps: usize = if threads == 1 { 1 } else { cfg.reps };
+  let share: Duration = cfg.budget / reps as u32;
+
+  let mut medians: Vec<f64> = Vec::with_capacity(reps);
+  let mut count: usize = 0;
+
+  for _ in 0..reps {
+    let pool: Pool = Pool::new(threads);
+    let (value, samples) = measure(share, ops, || sample(&pool));
+
+    medians.push(value);
+    count += samples;
+  }
+
+  (median(&mut medians), count)
 }
 
 // -----------------------------------------------------------------------------
 // Rows
 // -----------------------------------------------------------------------------
 
-fn read_seq(threads: usize, budget: Duration) -> (f64, usize) {
+fn read_seq(threads: usize, cfg: Config) -> (f64, usize) {
   let table: Arc<Table<usize>> = Arc::new(PTab::new());
   let keys: Arc<[Detached]> = (0..TOTAL)
     .map(|index| table.insert(index).unwrap())
     .collect();
 
-  let pool = Pool::new(threads);
   let per: usize = TOTAL / threads;
   let ops: usize = per * threads;
 
-  measure(budget, ops, || {
+  repeated(threads, cfg, ops, |pool| {
     let table: Arc<Table<usize>> = Arc::clone(&table);
     let keys: Arc<[Detached]> = Arc::clone(&keys);
 
@@ -199,15 +245,14 @@ fn read_seq(threads: usize, budget: Duration) -> (f64, usize) {
   })
 }
 
-fn read_hot(threads: usize, budget: Duration) -> (f64, usize) {
+fn read_hot(threads: usize, cfg: Config) -> (f64, usize) {
   let table: Arc<Table<usize>> = Arc::new(PTab::new());
   let hot: Detached = table.insert(0).unwrap();
 
-  let pool = Pool::new(threads);
   let per: usize = TOTAL / threads;
   let ops: usize = per * threads;
 
-  measure(budget, ops, || {
+  repeated(threads, cfg, ops, |pool| {
     let table: Arc<Table<usize>> = Arc::clone(&table);
 
     pool.run(Arc::new(move |_tid: usize| {
@@ -219,12 +264,11 @@ fn read_hot(threads: usize, budget: Duration) -> (f64, usize) {
   })
 }
 
-fn insert_seq(threads: usize, budget: Duration) -> (f64, usize) {
-  let pool = Pool::new(threads);
+fn insert_seq(threads: usize, cfg: Config) -> (f64, usize) {
   let per: usize = TOTAL / threads;
   let ops: usize = per * threads;
 
-  measure(budget, ops, || {
+  repeated(threads, cfg, ops, |pool| {
     // A fresh table per sample; building it is outside the timed region.
     let table: Arc<Table<usize>> = Arc::new(PTab::new());
 
@@ -237,14 +281,13 @@ fn insert_seq(threads: usize, budget: Duration) -> (f64, usize) {
   })
 }
 
-fn churn(threads: usize, budget: Duration) -> (f64, usize) {
+fn churn(threads: usize, cfg: Config) -> (f64, usize) {
   let table: Arc<Table<usize>> = Arc::new(PTab::new());
 
-  let pool = Pool::new(threads);
   let per: usize = TOTAL / threads;
   let ops: usize = per * threads;
 
-  measure(budget, ops, || {
+  repeated(threads, cfg, ops, |pool| {
     let table: Arc<Table<usize>> = Arc::clone(&table);
 
     pool.run(Arc::new(move |tid: usize| {
@@ -257,7 +300,7 @@ fn churn(threads: usize, budget: Duration) -> (f64, usize) {
 }
 
 /// Drops a full table on the calling thread. Only the drop is timed.
-fn drop_table(budget: Duration) -> (f64, usize) {
+fn drop_table(cfg: Config) -> (f64, usize) {
   struct DropMe(usize);
 
   impl Drop for DropMe {
@@ -266,7 +309,7 @@ fn drop_table(budget: Duration) -> (f64, usize) {
     }
   }
 
-  measure(budget, TOTAL, || {
+  measure(cfg.budget, TOTAL, || {
     let table: Table<DropMe> = PTab::new();
 
     for index in 0..TOTAL {
@@ -303,7 +346,17 @@ fn main() {
   }
 
   let threads: &[usize] = if quick { QUICK_THREADS } else { FULL_THREADS };
-  let budget: Duration = if quick { QUICK_BUDGET } else { FULL_BUDGET };
+  let cfg: Config = if quick {
+    Config {
+      budget: QUICK_BUDGET,
+      reps: QUICK_REPS,
+    }
+  } else {
+    Config {
+      budget: FULL_BUDGET,
+      reps: FULL_REPS,
+    }
+  };
 
   // Confirm the scheduler class reaches the workers before any timing happens.
   qos::set_realtime();
@@ -317,11 +370,11 @@ fn main() {
 
   // One thread first, then each multi-thread count; Drop is single-threaded only.
   for count in std::iter::once(1).chain(threads.iter().copied()) {
-    report("ReadSeq", count, read_seq(count, budget));
-    report("ReadHot", count, read_hot(count, budget));
-    report("InsertSeq", count, insert_seq(count, budget));
-    report("Churn", count, churn(count, budget));
+    report("ReadSeq", count, read_seq(count, cfg));
+    report("ReadHot", count, read_hot(count, cfg));
+    report("InsertSeq", count, insert_seq(count, cfg));
+    report("Churn", count, churn(count, cfg));
   }
 
-  report("Drop", 1, drop_table(budget));
+  report("Drop", 1, drop_table(cfg));
 }
