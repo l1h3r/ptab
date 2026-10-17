@@ -279,7 +279,6 @@ where
 {
 }
 
-
 // SAFETY:
 // - `Table` provides shared access to entries from multiple threads.
 // - This is only sound if `T: Sync`, as multiple shared references may be held.
