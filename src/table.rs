@@ -580,11 +580,13 @@ where
 #[cfg_attr(coverage_nightly, coverage(off))]
 #[cfg(test)]
 mod tests {
+  use core::time::Duration;
   use std::collections::HashSet;
   use std::sync::Arc;
   use std::sync::Barrier;
   use std::thread;
   use std::thread::JoinHandle;
+  use std::time::Instant;
 
   use crate::index::Abstract;
   use crate::index::Concrete;
@@ -1173,11 +1175,18 @@ mod tests {
       assert!(table.remove(key));
     }
 
-    // Force garbage collection - this should always succeed
-    // for our use-case since we are single-threaded
-    DefParams::flush();
+    // `flush` is best-effort. Other tests can hold guards on the harness's
+    // threads and keep the epoch from advancing, so retry until every removed
+    // entry is dropped or the deadline passes.
+    let expected: u32 = table.cap() as u32 / 2;
+    let deadline: Instant = Instant::now() + Duration::from_secs(10);
 
-    assert_eq!(DropMe::load(), table.cap() as u32 / 2);
+    while DropMe::load() > expected && Instant::now() < deadline {
+      DefParams::flush();
+      thread::sleep(Duration::from_millis(1));
+    }
+
+    assert_eq!(DropMe::load(), expected);
     assert_eq!(DropMe::load(), table.len());
     drop(table);
     assert_eq!(DropMe::load(), 0);
