@@ -272,6 +272,8 @@ where
 // SAFETY:
 // - `Table` may transfer ownership of entries across threads.
 // - This is only sound if `T: Send`.
+// - `P` is configuration only (capacity and layout), held as `PhantomData<fn(P)>`, so
+//   it needs no bound.
 unsafe impl<T, P> Send for Table<T, P>
 where
   T: Send,
@@ -280,11 +282,15 @@ where
 }
 
 // SAFETY:
-// - `Table` provides shared access to entries from multiple threads.
-// - This is only sound if `T: Sync`, as multiple shared references may be held.
+// - `Sync` covers shared `&T` handed out by `with` and `read`: several threads may
+//   hold references to one entry at once, which needs `T: Sync`.
+// - `Send` covers values moved in by `insert` and `write` on one thread and dropped
+//   by `remove` or `Drop` on another, possibly later once reclaimed, which needs
+//   `T: Send`.
+// - Both bounds are therefore required. `P` needs no bound, as for `Send`.
 unsafe impl<T, P> Sync for Table<T, P>
 where
-  T: Sync,
+  T: Send + Sync,
   P: Params + ?Sized,
 {
 }
