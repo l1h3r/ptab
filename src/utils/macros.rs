@@ -24,7 +24,9 @@ macro_rules! each_capacity {
     )+
   };
   (@run $expr:expr, $bits:expr) => {{
-    const S: usize = 1 << $bits;
+    // Clamped like `ConstParams`, so bits outside the target's range still
+    // name the capacity the table gets.
+    const S: usize = $crate::params::Capacity::new(1 << $bits).as_usize();
     type P = $crate::params::ConstParams::<{ S }>;
     $expr
   }};
