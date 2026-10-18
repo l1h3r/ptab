@@ -9,6 +9,15 @@ A lock-free, fixed-capacity concurrent table for read-heavy workloads.
 
 Ported from the Erlang/OTP process table. Lookups use atomic loads and write nothing to the table. Consecutive inserts land in different cache lines. Capacity and the reclamation strategy are set at compile time.
 
+## Usage
+
+Add the following to your `Cargo.toml`:
+
+```toml
+[dependencies]
+ptab = "0.1"
+```
+
 ## Example
 
 ```rust
