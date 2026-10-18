@@ -271,9 +271,11 @@ pub struct Capacity(CapacityEnum);
 
 const _: () = assert!(align_of::<Capacity>() == align_of::<usize>());
 const _: () = assert!(size_of::<Capacity>() == size_of::<usize>());
+const _: () = assert!(Capacity::MIN.as_usize() >= CACHE_LINE_SLOTS);
 
 impl Capacity {
-  /// The minimum supported capacity (2⁴ entries).
+  /// The minimum supported capacity: 2⁴ slots, or one cache line of slots
+  /// ([`CACHE_LINE_SLOTS`]) where a line holds more.
   pub const MIN: Self = Self(CapacityEnum::MIN);
 
   /// The maximum supported capacity (2²⁷ slots, one of them reserved).
@@ -368,7 +370,7 @@ impl Capacity {
   /// ```
   /// use ptab::Capacity;
   ///
-  /// assert_eq!(Capacity::new(16).log2(), 4);
+  /// assert_eq!(Capacity::new(64).log2(), 6);
   /// assert_eq!(Capacity::new(1024).log2(), 10);
   /// ```
   #[inline]
@@ -441,7 +443,14 @@ enum CapacityEnum {
 }
 
 impl CapacityEnum {
-  const MIN: Self = Self::Capacity1Shl4;
+  // The smallest table fills one cache line, so every block is whole.
+  const MIN: Self = if CACHE_LINE_SLOTS <= 1 << 4 {
+    Self::Capacity1Shl4
+  } else if CACHE_LINE_SLOTS == 1 << 5 {
+    Self::Capacity1Shl5
+  } else {
+    panic!("invalid params: `CACHE_LINE_SLOTS` exceeds 32")
+  };
 
   #[cfg(miri)]
   const MAX: Self = Self::Capacity1Shl10;
@@ -602,7 +611,7 @@ mod tests {
 
   #[test]
   fn capacity_debug() {
-    assert_eq!(format!("{:?}", Capacity::MIN), "16 (1 << 4)");
+    assert_eq!(format!("{:?}", Capacity::new(64)), "64 (1 << 6)");
   }
 
   #[test]
