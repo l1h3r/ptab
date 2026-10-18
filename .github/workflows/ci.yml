@@ -106,6 +106,22 @@ jobs:
           MIRIFLAGS: -Zmiri-strict-provenance
           RUSTFLAGS: -Dwarnings --cfg ptab_miri
 
+  miri_seeds:
+    name: Miri (many seeds)
+    needs: pre_ci
+    if: needs.pre_ci.outputs.continue
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@miri
+      - run: cargo miri setup
+      # Each test runs once per seed, so threaded tests see other schedules.
+      - run: cargo miri test
+        env:
+          MIRIFLAGS: -Zmiri-strict-provenance -Zmiri-many-seeds=0..32
+          RUSTFLAGS: -Dwarnings --cfg ptab_miri
+
   fmt:
     name: Format
     needs: pre_ci
