@@ -5,23 +5,9 @@
 [![docs.rs][shield-img-docs]][shield-url-docs]
 [![build status][shield-img-ci]][shield-url-ci]
 
-A lock-free concurrent table for Rust.
+A lock-free, fixed-capacity concurrent table for read-heavy workloads.
 
-**ptab** provides a fixed-capacity table optimized for read-heavy concurrent workloads. Inspired by Erlang's BEAM process table, lookups scale linearly with CPU count by avoiding all shared memory writes.
-
-## Features
-
-- **Zero-contention reads** - Atomic loads for lock-free lookups.
-- **Cache-line distribution** - Prevents false sharing with no memory overhead.
-
-## Usage
-
-Add the following to your `Cargo.toml`:
-
-```toml
-[dependencies]
-ptab = "0.1"
-```
+Ported from the Erlang/OTP process table. Lookups use atomic loads and write no shared memory, so readers do not contend. Consecutive inserts land in different cache lines. Capacity and the reclamation strategy are set at compile time.
 
 ## Example
 
@@ -45,7 +31,7 @@ assert_eq!(table.read(index_b).unwrap(), "world");
 
 ## Design
 
-See [`IMPLEMENTATION.md`] for detailed design notes.
+See [`IMPLEMENTATION.md`] for design notes.
 
 <br>
 
