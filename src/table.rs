@@ -16,7 +16,7 @@ use crate::padded::CachePadded;
 use crate::params::CACHE_LINE_SLOTS;
 use crate::params::Capacity;
 use crate::params::Params;
-use crate::params::ParamsExt;
+use crate::params::ParamsExt as _;
 use crate::reclaim;
 use crate::reclaim::Atomic as _;
 use crate::reclaim::CollectorWeak;
@@ -579,6 +579,10 @@ where
 #[cfg(not(any(loom, shuttle)))]
 #[cfg_attr(coverage_nightly, coverage(off))]
 #[cfg(test)]
+#[allow(
+  clippy::std_instead_of_alloc,
+  reason = "tests run with `std` and the `alloc` crate is not declared"
+)]
 mod tests {
   use core::time::Duration;
   use std::collections::HashSet;
@@ -594,8 +598,8 @@ mod tests {
   use crate::params::CACHE_LINE_SLOTS;
   use crate::params::Capacity;
   use crate::params::ConstParams;
-  use crate::params::Params;
-  use crate::params::ParamsExt;
+  use crate::params::Params as _;
+  use crate::params::ParamsExt as _;
   use crate::reclaim::Atomic as _;
   use crate::sync::atomic::AtomicUsize;
   use crate::sync::atomic::Ordering;

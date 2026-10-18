@@ -4,7 +4,7 @@ use core::fmt::Formatter;
 use core::fmt::Result;
 
 use crate::params::Params;
-use crate::params::ParamsExt;
+use crate::params::ParamsExt as _;
 
 macro_rules! internal_index {
   ($name:ident) => {
@@ -272,11 +272,11 @@ mod tests {
   use crate::index::Concrete;
   use crate::index::Detached;
   use crate::params::CACHE_LINE_SLOTS;
-  use crate::params::Params;
-  use crate::params::ParamsExt;
+  use crate::params::Params as _;
+  use crate::params::ParamsExt as _;
   use crate::utils::each_capacity;
 
-  #[expect(clippy::clone_on_copy)]
+  #[expect(clippy::clone_on_copy, reason = "exercises the `Clone` impl")]
   #[test]
   fn abstract_clone_copy() {
     let a: Abstract<()> = Abstract::new(123);
@@ -288,7 +288,7 @@ mod tests {
     assert_eq!(c, a);
   }
 
-  #[expect(clippy::clone_on_copy)]
+  #[expect(clippy::clone_on_copy, reason = "exercises the `Clone` impl")]
   #[test]
   fn concrete_clone_copy() {
     let a: Concrete<()> = Concrete::new(123);

@@ -149,6 +149,10 @@ pub(crate) use crate::utils::alloc;
 pub(crate) use crate::utils::sync;
 
 pub mod implementation {
+  #![allow(
+    clippy::doc_include_without_cfg,
+    reason = "the module needs its docs in every build, not only rustdoc"
+  )]
   #![doc = include_str!("../IMPLEMENTATION.md")]
 }
 

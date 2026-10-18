@@ -6,7 +6,7 @@ use core::mem::MaybeUninit;
 use crate::index::Detached;
 use crate::params::DefaultParams;
 use crate::params::Params;
-use crate::params::ParamsExt;
+use crate::params::ParamsExt as _;
 use crate::reclaim::Collector;
 use crate::table::Table;
 

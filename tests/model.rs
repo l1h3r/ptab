@@ -42,7 +42,7 @@ use self::model::Arc;
 use self::model::JoinHandle;
 use self::model::thread;
 
-use std::ops::Deref;
+use core::ops::Deref;
 
 use ptab::Capacity;
 use ptab::ConstParams;

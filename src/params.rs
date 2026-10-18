@@ -414,7 +414,7 @@ impl From<Capacity> for usize {
 }
 
 // Most variants are only produced by transmuting a valid power of two.
-#[allow(dead_code)]
+#[allow(dead_code, reason = "variants are only built by transmute")]
 #[derive(Copy, Clone, PartialEq, Eq)]
 #[repr(usize)]
 enum CapacityEnum {
@@ -535,8 +535,8 @@ mod tests {
   use crate::params::CACHE_LINE_SLOTS;
   use crate::params::Capacity;
   use crate::params::DefaultParams;
-  use crate::params::Params;
-  use crate::params::ParamsExt;
+  use crate::params::Params as _;
+  use crate::params::ParamsExt as _;
   use crate::params::derive_blocks;
   use crate::params::derive_layout;
   use crate::utils::each_capacity;

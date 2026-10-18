@@ -143,7 +143,27 @@ cast_possible_truncation = "allow"
 doc_markdown = "allow"
 manual_map = "allow"
 must_use_candidate = "allow"
+option_if_let_else = "allow"
+redundant_pub_crate = "allow"
 unused_self = "allow"
+
+# Restriction Lints
+alloc_instead_of_core = "deny"
+allow_attributes_without_reason = "deny"
+dbg_macro = "deny"
+doc_include_without_cfg = "deny"
+let_underscore_untyped = "deny"
+multiple_unsafe_ops_per_block = "deny"
+pub_without_shorthand = "deny"
+renamed_function_params = "deny"
+self_named_module_files = "deny"
+std_instead_of_alloc = "deny"
+std_instead_of_core = "deny"
+undocumented_unsafe_blocks = "deny"
+unnecessary_safety_comment = "deny"
+unnecessary_safety_doc = "deny"
+unseparated_literal_suffix = "deny"
+unused_trait_names = "deny"
 
 # ------------------------------------------------------------------------------
 # Rustdoc Lints
