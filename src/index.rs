@@ -144,8 +144,9 @@ impl Detached {
 
   /// Returns the `(number, serial)` components of this index under `P`.
   ///
-  /// `number` is the low [`Params::LENGTH`] bits of the allocation counter.
-  /// `serial` is the remaining bits, which grow each time the slot is reused.
+  /// `number` is the allocation counter modulo [`Params::LENGTH`]. `serial` is
+  /// the counter divided by [`Params::LENGTH`], which grows each time the slot
+  /// is reused.
   ///
   /// # Examples
   ///

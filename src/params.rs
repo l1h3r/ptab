@@ -83,11 +83,11 @@ pub trait Params {
 /// println!("{:#?}", <ConstParams<1024> as ParamsExt>::debug());
 /// ```
 pub trait ParamsExt: Params + Sealed {
-  /// The number of cache-line blocks the table occupies.
+  /// The number of cache-line blocks in each of the table's two arrays.
   const BLOCKS: NonZeroUsize = derive_blocks::<Self>();
-  /// The memory layout of the table allocation.
+  /// The memory layout of one array allocation.
   const LAYOUT: Layout = derive_layout::<Self>();
-  /// The size of the table allocation in bytes.
+  /// The size of one array allocation in bytes.
   const MEMORY: usize = Self::BLOCKS.get().strict_mul(CACHE_LINE);
 
   /// The number of bits needed to address every entry.

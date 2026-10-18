@@ -40,7 +40,7 @@ A reference count makes every reader write to the same cache line. The line boun
 `ReadOnly` holds two arrays of `Params::LENGTH` elements, each allocated aligned to a cache line:
 
 - `data` holds the entries.
-- `slot` holds, for each position of `data`, the next index that position hands out.
+- `slot` is a ring of free `Abstract` indices (see Allocation). The index an insert takes from it names the `data` position the new entry uses.
 
 The name is loose. Elements of both arrays change atomically, but the arrays themselves never move.
 
@@ -50,7 +50,7 @@ An entry is named by three forms of one number.
 
 `Detached` is the public form, a `usize`. Its low bits are the `Concrete` index and the remaining high bits are the serial. `Detached::decompose` returns the `(number, serial)` pair.
 
-`Abstract` is the allocation counter. The first allocation is 0, the second is 1, and so on. A slot that is freed gets its previous `Abstract` index plus `Params::LENGTH`, so the low bits stay the same and the serial grows by one.
+`Abstract` is the allocation counter. The first allocation is 0, the second is 1, and so on. When an entry is removed, its index plus `Params::LENGTH` goes back into the ring, so the low bits stay the same and the serial grows by one.
 
 `Concrete` is the offset into `data` and `slot`. Every `Abstract` index that differs only in its serial maps to the same `Concrete` index.
 
