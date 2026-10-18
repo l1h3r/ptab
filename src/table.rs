@@ -479,20 +479,24 @@ where
 
 /// Iterator over indices in a [`PTab`] with weak snapshot semantics.
 ///
-/// `WeakKeys` performs a lock-free scan of the underlying table and yields
-/// [`Detached`] indices for entries observed as present.
+/// Scans the table without locking and yields a [`Detached`] index for each
+/// entry observed as present. Returned by [`PTab::weak_keys()`].
 ///
 /// # Consistency Model
 ///
-/// This iterator is **weakly consistent**:
+/// The iterator is weakly consistent:
 ///
-/// - It does not guarantee a consistent snapshot.
-/// - It does not prevent concurrent insertions or removals.
-/// - It never yields an index that was never fully initialized.
+/// - It is not a snapshot and does not block insertions or removals.
+/// - It never yields an index whose entry was not fully initialized.
 /// - It may miss entries that were present when iteration began.
 /// - It may yield entries that are removed immediately afterward.
 ///
+/// Note: yielded indices have serial 0, so once a slot has been reused they
+/// differ from the index `insert` returned. Lookups use only the slot bits, so
+/// both reach the same slot.
+///
 /// [`PTab`]: crate::public::PTab
+/// [`PTab::weak_keys()`]: crate::public::PTab::weak_keys
 pub struct WeakKeys<'table, T, P>
 where
   P: Params + ?Sized,

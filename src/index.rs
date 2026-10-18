@@ -75,8 +75,8 @@ macro_rules! internal_index {
 
 /// An opaque index identifying a table entry.
 ///
-/// Returned by [`PTab::insert`] and [`PTab::write`]; used to access or remove
-/// entries.
+/// Returned by [`PTab::insert`] and [`PTab::write`]. Used to access or remove
+/// the entry.
 ///
 /// # Stale Indices
 ///
@@ -111,19 +111,28 @@ pub struct Detached {
 }
 
 impl Detached {
-  /// Creates a [`Detached`] index from its raw bit representation.
+  /// Creates a [`Detached`] index from its raw bits.
   ///
   /// # Warning
   ///
   /// Table operations use only the slot bits of the index. An arbitrary bit
   /// pattern is safe to use, and reaches whatever entry occupies that slot, or
   /// returns [`None`] or `false` when the slot is empty.
+  ///
+  /// # Examples
+  ///
+  /// ```
+  /// use ptab::Detached;
+  ///
+  /// let index = Detached::from_bits(7);
+  /// assert_eq!(index.into_bits(), 7);
+  /// ```
   #[inline]
   pub const fn from_bits(bits: usize) -> Self {
     Self { bits }
   }
 
-  /// Returns the raw bit representation of this index.
+  /// Returns the raw bits of this index.
   ///
   /// See [`from_bits`] to reconstruct an index.
   ///
@@ -133,7 +142,25 @@ impl Detached {
     self.bits
   }
 
-  /// Translates this index into its `(number, serial)` components.
+  /// Returns the `(number, serial)` components of this index under `P`.
+  ///
+  /// `number` is the low [`Params::LENGTH`] bits of the allocation counter.
+  /// `serial` is the remaining bits, which grow each time the slot is reused.
+  ///
+  /// # Examples
+  ///
+  /// ```
+  /// use ptab::{ConstParams, PTab};
+  ///
+  /// let table: PTab<i32, ConstParams<16>> = PTab::new();
+  /// let first = table.insert(1).unwrap();
+  /// let second = table.insert(2).unwrap();
+  ///
+  /// assert_eq!(first.decompose::<ConstParams<16>>(), (0, 0));
+  /// assert_eq!(second.decompose::<ConstParams<16>>(), (1, 0));
+  /// ```
+  ///
+  /// [`Params::LENGTH`]: crate::params::Params::LENGTH
   #[inline]
   pub const fn decompose<P>(self) -> (u32, u32)
   where

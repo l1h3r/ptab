@@ -43,8 +43,7 @@ const _: () = assert!(
 
 /// Compile-time configuration for a [`PTab`].
 ///
-/// Allows compile-time customization of table parameters. The simplest approach
-/// is through [`ConstParams`]:
+/// [`ConstParams`] is the simplest implementation:
 ///
 /// ```
 /// use ptab::{PTab, ConstParams};
@@ -56,7 +55,7 @@ const _: () = assert!(
 pub trait Params {
   /// The memory reclamation strategy used for removed entries.
   ///
-  /// See [`Collector`] for more info.
+  /// See [`Collector`] for more information.
   ///
   /// [`Collector`]: crate::reclaim::Collector
   type Collector: CollectorWeak;
@@ -64,7 +63,7 @@ pub trait Params {
   /// The number of slots in the table. The table holds this many entries, except
   /// at [`Capacity::MAX`], where one slot is reserved and it holds one fewer.
   ///
-  /// See [`Capacity`] for more info.
+  /// See [`Capacity`] for more information.
   const LENGTH: Capacity = DefaultParams::LENGTH;
 }
 
@@ -74,10 +73,9 @@ pub trait Params {
 
 /// Derived parameters computed from [`Params`].
 ///
-/// Automatically implemented for all [`Params`] types. Provides computed
-/// constants used internally.
+/// Implemented for every [`Params`] type.
 ///
-/// # Example
+/// # Examples
 ///
 /// ```
 /// use ptab::{config::ParamsExt, ConstParams};
@@ -139,10 +137,9 @@ impl<P> ParamsExt for P where P: Params + ?Sized {}
 // Debug Params
 // -----------------------------------------------------------------------------
 
-/// A helper type for displaying [`Params`] configuration.
+/// Displays the derived values of a [`Params`] type.
 ///
-/// Returned by [`ParamsExt::debug`]; implements [`Debug`] to show all derived
-/// configuration values.
+/// Returned by [`ParamsExt::debug()`]. Implements [`Debug`].
 #[derive(Clone, Copy)]
 pub struct DebugParams<P>
 where
@@ -177,9 +174,9 @@ where
 
 /// The default table configuration with [`Capacity::DEF`] slots.
 ///
-/// Used when creating a table without specifying a custom [`Params`] type.
+/// Used when a table does not name a [`Params`] type.
 ///
-/// # Example
+/// # Examples
 ///
 /// ```
 /// use ptab::{PTab, DefaultParams};
@@ -208,8 +205,7 @@ impl Params for DefaultParams {
 
 /// A [`Params`] implementation with compile-time configurable capacity.
 ///
-/// The recommended way to create tables with custom capacities. The capacity
-/// `N` is rounded up to the nearest power of two and clamped to
+/// `N` rounds up to a power of two and clamps to
 /// <code>[Capacity::MIN]..=[Capacity::MAX]</code>.
 ///
 /// # Examples
@@ -280,7 +276,7 @@ impl Capacity {
   /// The minimum supported capacity (2⁴ entries).
   pub const MIN: Self = Self(CapacityEnum::MIN);
 
-  /// The maximum supported capacity (2²⁷ entries).
+  /// The maximum supported capacity (2²⁷ slots, one of them reserved).
   pub const MAX: Self = Self(CapacityEnum::MAX);
 
   /// The default capacity (2²⁰ entries).
@@ -288,8 +284,7 @@ impl Capacity {
 
   /// Creates a `Capacity` from a `usize`.
   ///
-  /// Rounds up to the nearest power of two and clamps to
-  /// <code>[MIN]..=[MAX]</code>.
+  /// Rounds up to a power of two and clamps to <code>[MIN]..=[MAX]</code>.
   ///
   /// # Examples
   ///
