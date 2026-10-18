@@ -13,7 +13,6 @@ A lock-free concurrent table for Rust.
 
 - **Zero-contention reads** - Atomic loads for lock-free lookups.
 - **Cache-line distribution** - Prevents false sharing with no memory overhead.
-- **Generational indices** - Slot reuse mitigates ABA problems.
 
 ## Usage
 

@@ -6,10 +6,12 @@
 //!
 //! # Overview
 //!
-//! The table assigns each inserted value a [`Detached`] index that uniquely
-//! identifies that entry. This index can be used to look up, access, or remove
-//! the entry. Indices include a generational component to mitigate the
-//! [ABA problem] in concurrent algorithms.
+//! The table assigns each inserted value a [`Detached`] index. The index looks
+//! up, accesses or removes the entry.
+//!
+//! Lookup and removal use only the slot bits of an index. A slot is reused after
+//! removal, so an index kept past its entry's removal reaches whatever entry
+//! occupies that slot later.
 //!
 //! # Usage
 //!
@@ -123,9 +125,6 @@
 //! [`Params`]: crate::params::Params
 //! [`PTab::insert()`]: crate::public::PTab::insert
 //! [`memory`]: crate::memory
-//!
-//! [ABA problem]: https://en.wikipedia.org/wiki/ABA_problem
-//!
 
 #![cfg_attr(not(feature = "std"), no_std)]
 #![cfg_attr(coverage_nightly, feature(coverage_attribute))]

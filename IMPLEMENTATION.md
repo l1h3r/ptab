@@ -19,8 +19,7 @@ Traditional approaches using locks or lock-free structures with reference counti
 
 2. **Cache-line aware layout**: Adjacent slots reside in different cache lines to avoid false sharing when multiple threads insert concurrently.
 
-3. **Generational indices**: Reused slots produce different indices to mitigate ABA problems in concurrent algorithms.
-
+3. **Serial in the index**: Reused slots produce different indices, but lookup and removal use only the slot bits, so a stale index reaches the slot's current entry.
 
 ## Architecture Overview
 

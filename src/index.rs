@@ -78,11 +78,11 @@ macro_rules! internal_index {
 /// Returned by [`PTab::insert`] and [`PTab::write`]; used to access or remove
 /// entries.
 ///
-/// # Generational Indices
+/// # Stale Indices
 ///
-/// Each index contains a generational component that changes when a slot is
-/// reused. This helps mitigate the [ABA problem]: a stale index from a removed
-/// entry will not match a new entry occupying the same slot.
+/// Each index carries a serial that changes when a slot is reused, but lookup
+/// and removal read only the slot bits. An index kept past its entry's removal
+/// reaches the entry that later occupies the same slot.
 ///
 /// # Examples
 ///
@@ -104,7 +104,6 @@ macro_rules! internal_index {
 /// [`PTab`]: crate::public::PTab
 /// [`PTab::insert`]: crate::public::PTab::insert
 /// [`PTab::write`]: crate::public::PTab::write
-/// [ABA problem]: https://en.wikipedia.org/wiki/ABA_problem
 #[derive(Clone, Copy, Hash, PartialEq, Eq, PartialOrd, Ord)]
 #[repr(transparent)]
 pub struct Detached {
@@ -116,8 +115,9 @@ impl Detached {
   ///
   /// # Warning
   ///
-  /// An arbitrary bit pattern may not correspond to a valid table entry; using
-  /// it is safe but will return [`None`] or `false` from table operations.
+  /// Table operations use only the slot bits of the index. An arbitrary bit
+  /// pattern is safe to use, and reaches whatever entry occupies that slot, or
+  /// returns [`None`] or `false` when the slot is empty.
   #[inline]
   pub const fn from_bits(bits: usize) -> Self {
     Self { bits }
