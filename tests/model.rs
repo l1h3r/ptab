@@ -239,6 +239,28 @@ fn insert() {
 }
 
 #[test]
+fn insert_sequential() {
+  // Scenario: one thread inserts twice in a row while another inserts once.
+  // Expected: `len` counts all three entries and each key is handed out once.
+  driver::check(|| {
+    let table: Arc<PTab> = Arc::new(PTab::new());
+    let queue: WorkQueue = WorkQueue::new();
+
+    queue.spawn_insert(Arc::clone(&table), 2, |index| index);
+    queue.spawn_insert(Arc::clone(&table), 1, |index| index);
+
+    let trace: Trace = queue.join();
+
+    assert_eq!(table.len(), 3);
+    assert_eq!(trace.inserts.len(), 3);
+
+    assert!(trace.inserts.count(1, &Some(Detached::from_bits(0))));
+    assert!(trace.inserts.count(1, &Some(Detached::from_bits(1))));
+    assert!(trace.inserts.count(1, &Some(Detached::from_bits(2))));
+  });
+}
+
+#[test]
 fn lookup() {
   driver::check(|| {
     let table: Arc<PTab> = Arc::new(PTab::new());
