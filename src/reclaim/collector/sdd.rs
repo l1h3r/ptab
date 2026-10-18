@@ -15,6 +15,9 @@ const NO_TAG: sdd::Tag = sdd::Tag::None;
 /// [`sdd`]: https://crates.io/crates/sdd
 pub enum Sdd {}
 
+// SAFETY: `evict` drops the swapped-out `sdd::Owned`, which hands the entry to
+// `sdd`'s collector. `sdd` runs its destructor once no guard can still observe
+// it, as the collector advances, so evicted entries are not permanently leaked.
 unsafe impl Collector for Sdd {}
 
 impl CollectorWeak for Sdd {
@@ -83,11 +86,13 @@ impl<T> Atomic<T> for sdd::AtomicOwned<T> {
 
     // SAFETY:
     // - Slot allocation guarantees the slot is empty before calling `write`.
-    // - Therefore `old.0` must be `None` and `old.1` must be `Tag::None`.
-    unsafe {
-      hint::assert_unchecked(old.0.is_none());
-      hint::assert_unchecked(old.1 == NO_TAG);
-    }
+    // - Therefore `old.0` must be `None`.
+    unsafe { hint::assert_unchecked(old.0.is_none()) };
+
+    // SAFETY:
+    // - Slot allocation guarantees the slot is empty before calling `write`.
+    // - Therefore `old.1` must be `Tag::None`.
+    unsafe { hint::assert_unchecked(old.1 == NO_TAG) };
   }
 
   #[inline]

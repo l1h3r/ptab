@@ -6,7 +6,7 @@ use core::mem::MaybeUninit;
 use crate::index::Detached;
 use crate::params::DefaultParams;
 use crate::params::Params;
-use crate::params::ParamsExt;
+use crate::params::ParamsExt as _;
 use crate::reclaim::Collector;
 use crate::table::Table;
 
@@ -14,9 +14,8 @@ pub use crate::table::WeakKeys;
 
 /// A lock-free concurrent table.
 ///
-/// `PTab` stores entries of type `T` and provides concurrent access through
-/// opaque [`Detached`] indices. It is parameterized by `P` to configure
-/// capacity at compile time.
+/// Entries of type `T` are accessed through opaque [`Detached`] indices. `P`
+/// sets the capacity at compile time.
 ///
 /// See the [crate-level documentation] for an overview and examples.
 ///
@@ -105,9 +104,11 @@ where
     }
   }
 
-  /// Returns the maximum number of entries the table can hold.
+  /// Returns the number of entries the table can hold.
   ///
-  /// Determined by [`Params::LENGTH`] and fixed for the lifetime of the table.
+  /// Set by [`Params::LENGTH`] and fixed for the lifetime of the table. At
+  /// [`Capacity::MAX`] one slot is reserved, so this is one less than
+  /// [`Params::LENGTH`].
   ///
   /// # Examples
   ///
@@ -118,6 +119,7 @@ where
   /// assert_eq!(table.capacity(), 512);
   /// ```
   ///
+  /// [`Capacity::MAX`]: crate::params::Capacity::MAX
   /// [`Params::LENGTH`]: crate::params::Params::LENGTH
   #[inline]
   pub const fn capacity(&self) -> usize {
@@ -165,8 +167,8 @@ where
 
   /// Inserts a value into the table and returns its index.
   ///
-  /// Returns [`None`] if the table is at capacity. Use [`write()`] instead when
-  /// the stored value needs to know its own index.
+  /// Returns [`None`] if the table is full. [`write()`] gives the value its own
+  /// index.
   ///
   /// # Examples
   ///
@@ -188,18 +190,18 @@ where
     self.inner.insert(value)
   }
 
-  /// Inserts a value using an initialization function that receives the index.
+  /// Inserts a value built by `init`, which receives the entry's index.
   ///
-  /// Enables self-referential structures where the stored value contains its
-  /// own index. Returns [`None`] if the table is at capacity.
+  /// The stored value can contain its own index. Returns [`None`] if the table
+  /// is full.
   ///
-  /// # Requirements
+  /// `init` must fully initialize the [`MaybeUninit<T>`] before returning, and
+  /// should not call back into the table.
   ///
-  /// The `init` function:
+  /// # Panics
   ///
-  /// - **Must** fully initialize the [`MaybeUninit<T>`] before returning
-  /// - **Must not** panic (panics permanently leak a slot)
-  /// - **Should** avoid recursive table operations
+  /// Panics if `init` panics. The slot is then leaked for the lifetime of the
+  /// table.
   ///
   /// # Examples
   ///
@@ -233,9 +235,12 @@ where
 
   /// Removes the entry at the given index.
   ///
-  /// Returns `true` if an entry was removed, `false` if already absent. The
-  /// slot becomes available for reuse immediately; memory is reclaimed via
-  /// epoch-based reclamation once no readers hold references.
+  /// Returns `true` if an entry was removed, `false` if the slot was empty. The
+  /// slot is available for reuse immediately. The collector reclaims the memory
+  /// once no reader can hold a reference.
+  ///
+  /// Only the slot bits of `index` are used, so an index kept after its entry
+  /// was removed removes the entry that now occupies that slot.
   ///
   /// # Examples
   ///
@@ -251,14 +256,14 @@ where
   #[inline]
   pub fn remove(&self, index: Detached) -> bool
   where
-    P::Collector: Collector, // Enforce safe reclamation
+    P::Collector: Collector, // Removed entries must eventually be reclaimed
   {
     self.inner.remove(index)
   }
 
   /// Returns `true` if an entry exists at the given index.
   ///
-  /// May become stale immediately due to concurrent operations.
+  /// The result may be stale as soon as it returns.
   ///
   /// # Examples
   ///
@@ -279,9 +284,10 @@ where
 
   /// Accesses an entry by index, applying a function to it.
   ///
-  /// Returns [`None`] if no entry exists. The reference remains valid for the
-  /// callback's duration even under concurrent removal, due to epoch-based
-  /// reclamation.
+  /// Returns [`None`] if no entry exists. The reference stays valid for the
+  /// duration of `f`, even if another thread removes the entry.
+  ///
+  /// Panics in `f` propagate to the caller.
   ///
   /// # Examples
   ///
@@ -304,8 +310,8 @@ where
 
   /// Returns a copy of the entry at the given index.
   ///
-  /// Convenience method equivalent to `self.with(idx, |v| *v)`. Returns
-  /// [`None`] if no entry exists.
+  /// Equivalent to `self.with(index, |v| *v)`. Returns [`None`] if no entry
+  /// exists.
   ///
   /// # Examples
   ///
@@ -325,15 +331,10 @@ where
     self.inner.read(index, &P::guard())
   }
 
-  /// Returns a weakly consistent iterator over all currently allocated indices.
+  /// Returns a weakly consistent iterator over the indices of present entries.
   ///
-  /// # Semantics
-  ///
-  /// This iterator provides **weak snapshot semantics**:
-  ///
-  /// - Entries inserted after iteration begins **may or may not** be observed.
-  /// - Entries removed during iteration **may or may not** be observed.
-  /// - Each yielded index was valid at some instant during iteration.
+  /// Entries inserted or removed during iteration may or may not be observed.
+  /// See [`WeakKeys`] for details.
   ///
   /// # Examples
   ///

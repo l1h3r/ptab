@@ -1,15 +1,16 @@
 //! A lock-free, cache-line-aware concurrent table.
 //!
-//! `ptab` provides [`PTab`], a fixed-capacity table for storing entries and
-//! accessing them by opaque indices. It is optimized for read-heavy workloads
-//! where entries are looked up frequently from multiple threads simultaneously.
+//! [`PTab`] is a fixed-capacity table. Entries are stored and accessed by opaque
+//! indices. It targets read-heavy workloads with lookups from many threads.
 //!
 //! # Overview
 //!
-//! The table assigns each inserted value a [`Detached`] index that uniquely
-//! identifies that entry. This index can be used to look up, access, or remove
-//! the entry. Indices include a generational component to mitigate the
-//! [ABA problem] in concurrent algorithms.
+//! The table assigns each inserted value a [`Detached`] index, which looks up
+//! or removes the entry.
+//!
+//! Lookup and removal use only the slot bits of an index. A slot is reused after
+//! removal, so an index kept past its entry's removal reaches whatever entry
+//! occupies that slot later.
 //!
 //! # Usage
 //!
@@ -35,9 +36,8 @@
 //!
 //! # Configuration
 //!
-//! Table capacity is configured at compile time through the [`Params`] trait.
-//! The default configuration ([`DefaultParams`]) provides [`Capacity::DEF`]
-//! slots:
+//! Capacity is set at compile time through the [`Params`] trait.
+//! [`DefaultParams`] provides [`Capacity::DEF`] slots:
 //!
 //! ```
 //! use ptab::{PTab, DefaultParams};
@@ -47,7 +47,7 @@
 //! let table2: PTab<u64, DefaultParams> = PTab::new();
 //! ```
 //!
-//! For custom capacities, use [`ConstParams`]:
+//! [`ConstParams`] sets a custom capacity:
 //!
 //! ```
 //! use ptab::{PTab, ConstParams};
@@ -56,13 +56,12 @@
 //! assert_eq!(table.capacity(), 512);
 //! ```
 //!
-//! Capacity is always rounded up to the nearest power of two and clamped
-//! to the range <code>[Capacity::MIN]..=[Capacity::MAX]</code>.
+//! Capacity rounds up to a power of two and clamps to
+//! <code>[Capacity::MIN]..=[Capacity::MAX]</code>.
 //!
 //! # Concurrency
 //!
-//! All operations on [`PTab`] are thread-safe and lock-free. Multiple threads
-//! can concurrently insert, remove, and access entries without blocking.
+//! All operations on [`PTab`] are thread-safe and lock-free.
 //!
 //! ```no_run
 //! use ptab::{PTab, ConstParams};
@@ -91,24 +90,25 @@
 //!
 //! ## Memory Reclamation
 //!
-//! Removed entries are reclaimed using a pluggable memory management strategy.
-//! By default, epoch-based reclamation via [`sdd`] ensures safe concurrent
-//! access. In no-std environments, a leak-based fallback is available.
+//! Removed entries are reclaimed by the collector that `Params::Collector`
+//! selects, deferred while any reader may still hold a reference. With the
+//! `sdd` feature (the default) `DefaultParams` uses a collector that
+//! eventually reclaims every removed entry. Without it the default is a leaking
+//! collector, which never reclaims and does not support `remove`.
 //!
 //! See [`memory`] for reclamation trait details and custom implementations.
 //!
 //! # Memory Layout
 //!
-//! The table uses a cache-line-aware memory layout to minimize false sharing
-//! between threads. Consecutive allocations are distributed across different
-//! cache lines, reducing contention when multiple threads operate on
-//! recently-allocated entries. See [`CACHE_LINE_SLOTS`] for the distribution
-//! stride.
+//! Consecutive allocations land in different cache lines, so threads that insert
+//! together do not share a line. See [`CACHE_LINE_SLOTS`] for the slots per
+//! line and [`implementation`] for the index layout.
 //!
 //! # Capacity Limits
 //!
 //! Capacity is bounded by [`Capacity::MIN`] and [`Capacity::MAX`]. The default
-//! is [`Capacity::DEF`]. When full, [`PTab::insert()`] returns [`None`].
+//! is [`Capacity::DEF`]. When full, [`PTab::insert()`] returns [`None`]. At
+//! [`Capacity::MAX`] one slot is reserved, so the table holds one fewer entry.
 //!
 //! [Capacity::MAX]: crate::params::Capacity::MAX
 //! [Capacity::MIN]: crate::params::Capacity::MIN
@@ -121,10 +121,7 @@
 //! [`Params`]: crate::params::Params
 //! [`PTab::insert()`]: crate::public::PTab::insert
 //! [`memory`]: crate::memory
-//!
-//! [ABA problem]: https://en.wikipedia.org/wiki/ABA_problem
-//! [`sdd`]: https://docs.rs/sdd
-//!
+//! [`implementation`]: crate::implementation
 
 #![cfg_attr(not(feature = "std"), no_std)]
 #![cfg_attr(coverage_nightly, feature(coverage_attribute))]
@@ -149,12 +146,15 @@ pub(crate) use crate::utils::alloc;
 pub(crate) use crate::utils::sync;
 
 pub mod implementation {
+  #![allow(
+    clippy::doc_include_without_cfg,
+    reason = "the module needs its docs in every build, not only rustdoc"
+  )]
   #![doc = include_str!("../IMPLEMENTATION.md")]
 }
 
 pub mod config {
-  //! Configuration parameters which can be used to override the default table
-  //! settings.
+  //! Compile-time table configuration.
 
   pub use crate::params::CACHE_LINE;
   pub use crate::params::CACHE_LINE_SLOTS;

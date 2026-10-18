@@ -1,103 +1,112 @@
 # Implementation Notes
 
-This document describes the design and implementation of `ptab`, a lock-free concurrent table optimized for read-heavy workloads.
+Design notes for `ptab`, a lock-free concurrent table for read-heavy workloads.
 
 ## Background
 
-The design is inspired by the Erlang/OTP process table implementation, documented in the BEAM source code. The problem it solves is mapping process identifiers to process structures in a highly concurrent environment where:
+The design follows the Erlang/OTP process table. That table maps process identifiers to process structures under these conditions:
 
-- Lookups vastly outnumber insertions and deletions
-- Multiple threads perform lookups simultaneously
-- Lookups must not modify any shared state (no reference counting)
-- The data structure must scale with CPU count
+- Lookups far outnumber insertions and removals.
+- Many threads look up entries at once.
+- A lookup must not modify shared state, including reference counts.
 
-Traditional approaches using locks or lock-free structures with reference counting suffer from cache-line contention. Even a simple atomic increment of a reference counter requires the cache line to bounce between all CPUs performing lookups, creating a severe scalability bottleneck.
+A reference count makes every reader write to the same cache line. The line bounces between CPUs, and lookups stop scaling with the thread count. Readers here only load.
 
-## Design Goals
+## Goals
 
-1. **Zero-contention reads**: Lookups must not write to any shared memory. This is the single most important property for scalability.
+1. Lookups write no table memory.
+2. Consecutive insertions touch different cache lines, so concurrent inserters do not share a line.
+3. Capacity and layout are fixed at compile time. The arrays are allocated once and never resized.
 
-2. **Cache-line aware layout**: Adjacent slots reside in different cache lines to avoid false sharing when multiple threads insert concurrently.
-
-3. **Generational indices**: Reused slots produce different indices to mitigate ABA problems in concurrent algorithms.
-
-4. **Globally sequential allocation**: New indices are assigned in a consistent order across all threads, preserving the property that comparing two indices reveals their relative creation order.
-
-## Architecture Overview
+## Layout
 
 ```text
 ┌─────────────────────────────────────────────────────────────────┐
 │                            PTab<T, P>                           │
 ├─────────────────────────────────────────────────────────────────┤
 │  ┌───────────────────────┐    ┌───────────────────────────────┐ │
-│  │   Volatile (mutable)  │    │     ReadOnly (immutable)      │ │
-│  │   [cache-padded]      │    │     [cache-padded]            │ │
+│  │   Volatile            │    │   ReadOnly                    │ │
+│  │   [cache-padded]      │    │   [cache-padded]              │ │
 │  ├───────────────────────┤    ├───────────────────────────────┤ │
-│  │ entries: AtomicU32    │    │ data: Array<AtomicOwned<T>>   │ │
+│  │ entries: AtomicU32    │    │ data: Array<Atomic<T>>        │ │
 │  │ next_id: AtomicU32    │    │ slot: Array<AtomicUsize>      │ │
 │  │ free_id: AtomicU32    │    │                               │ │
 │  └───────────────────────┘    └───────────────────────────────┘ │
 └─────────────────────────────────────────────────────────────────┘
 ```
 
-The table splits into two sections:
+`Volatile` holds the counters that every insertion and removal updates. Padding keeps them off the lines that readers load.
 
-- **Volatile**: Counters modified during operations. Grouped together and cache-padded to isolate from read-only data.
+`ReadOnly` holds two arrays of `Params::LENGTH` elements, each allocated aligned to a cache line:
 
-- **ReadOnly**: The storage arrays. Despite the name, individual slots are modified atomically, but the arrays themselves are allocated once and never resized.
+- `data` holds the entries.
+- `slot` is a ring of free `Abstract` indices (see Allocation). The index an insert takes from it names the `data` position the new entry uses.
 
-## Index Structure
+The name is loose. Elements of both arrays change atomically, but the arrays themselves never move.
 
-Indices come in three forms encoding the same information differently:
+## Index Forms
 
-### `Detached` Index
+An entry is named by three forms of one number.
 
-The public-facing index type. Encodes both a slot identifier and a generational component in a single `usize`. The bit layout interleaves these components to enable efficient conversion to concrete indices.
+`Detached` is the public form, a `usize`. Its low bits are the `Concrete` index and the remaining high bits are the serial. `Detached::decompose` returns the `(number, serial)` pair.
 
-### `Abstract` Index
+`Abstract` is the allocation counter. The first allocation is 0, the second is 1, and so on. When an entry is removed, its index plus `Params::LENGTH` goes back into the ring, so the low bits stay the same and the serial grows by one.
 
-A sequential counter representing allocation order. Abstract index 0 is the first allocation, 1 the second, and so on. When a slot is freed and reallocated, it receives a new abstract index (old index plus capacity), incrementing its generation.
-
-### `Concrete` Index
-
-The actual offset into storage arrays. Multiple abstract indices map to the same concrete index (differing only in generation). The mapping from abstract to concrete distributes consecutive allocations across cache lines.
-
-### Index Conversions
+`Concrete` is the offset into `data` and `slot`. Every `Abstract` index that differs only in its serial maps to the same `Concrete` index.
 
 ```text
-Abstract Index <------> Detached Index
-      |                       |
-      |                       |
-      v                       v
-Concrete Index <--------------+
+Abstract <------> Detached
+    |                 |
+    v                 |
+Concrete <------------+
 ```
 
-Conversions use bit manipulation with precomputed masks and shifts derived from `Params::LENGTH` at compile time.
+The conversions use masks and shifts that `ParamsExt` derives from `Params::LENGTH`:
+
+- `ID_MASK_ENTRY` is `LENGTH - 1`. It selects the entry bits of an index.
+- `ID_MASK_BLOCK` is the block count minus one, and `ID_SHIFT_INDEX` is the number of bits in it.
+- `ID_MASK_INDEX` is the slots per cache line minus one, and `ID_SHIFT_BLOCK` is the number of bits in it.
+
+A block is one cache line of slots. Lookup and removal take the `Concrete` index from a `Detached` index by masking with `ID_MASK_ENTRY`. They ignore the serial.
 
 ## Cache-Line Distribution
 
-A naive table places slots 0, 1, 2, ... in consecutive memory locations. When multiple threads allocate simultaneously, they write to adjacent slots, likely in the same cache line, causing contention.
+Mapping the allocation counter straight to an array offset would place consecutive insertions in adjacent slots. Threads inserting together would write to one cache line.
 
-Instead, `ptab` distributes consecutive allocations across cache lines:
+The `Abstract` to `Concrete` mapping puts the low bits of the counter in the block position:
 
 ```text
-Cache Line 0:  slot 0,  slot 8,  slot 16, slot 24, ...
-Cache Line 1:  slot 1,  slot 9,  slot 17, slot 25, ...
-Cache Line 2:  slot 2,  slot 10, slot 18, slot 26, ...
-   ...
-Cache Line 7:  slot 7,  slot 15, slot 23, slot 31, ...
+concrete = ((abstract & ID_MASK_BLOCK) << ID_SHIFT_BLOCK)
+         + ((abstract >> ID_SHIFT_INDEX) & ID_MASK_INDEX)
 ```
 
-The abstract-to-concrete mapping implements this transformation:
+Consecutive allocations visit every block before any block gets a second slot. With a 128-byte line, 8-byte slots and 1024 entries there are 16 slots per line and 64 blocks:
 
-```rust,ignore
-concrete = (abstract & MASK_BLOCK) << SHIFT_BLOCK
-         + (abstract >> SHIFT_INDEX) & MASK_INDEX
+```text
+abstract  0  1  2 ... 63  64  65
+concrete  0 16 32 ... 1008 1  17
 ```
 
-Where `MASK_BLOCK` selects which cache line and `MASK_INDEX` selects position within that cache line. Constants derive from `CACHE_LINE_SLOTS`.
+Slots per line depend on the target. `CACHE_LINE_SLOTS` holds the value.
 
-This ensures only true conflicts trigger communication between processors, avoiding false sharing.
+## Capacity
+
+`Capacity` is a power of two from `Capacity::MIN` (2^4) to `Capacity::MAX` (2^27). `Capacity::new` rounds up and clamps. The block count is derived at compile time, and a capacity whose layout does not fit in `isize::MAX` bytes fails to compile.
+
+The table is full when `entries` reaches `LENGTH`. `insert` increments `entries` first and returns `None` after undoing the increment when the table is full.
+
+At `Capacity::MAX` one slot is reserved. `entries` starts at 1, so the table holds `LENGTH - 1` entries and `PTab::capacity` reports that.
+
+## Allocation
+
+`next_id` and `free_id` are counters that walk the `slot` array as a ring.
+
+- Insert takes the next value of `next_id`, maps it to a `Concrete` index and swaps the reserved marker (`usize::MAX`) into that slot. The old value is the `Abstract` index of the new entry. If the slot already held the marker, insert tries the next value.
+- Remove evicts the entry, then takes the next value of `free_id`. It stores the freed index plus `LENGTH` into that slot, replacing the marker, and decrements `entries`.
+
+## Reclamation
+
+Remove only unlinks the entry from `data`. The memory is handed to the collector chosen by `Params::Collector`, which defers freeing it while a reader may still hold a reference. Readers take a guard from the same collector before they load.
 
 ## References
 

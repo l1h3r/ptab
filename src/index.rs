@@ -4,7 +4,7 @@ use core::fmt::Formatter;
 use core::fmt::Result;
 
 use crate::params::Params;
-use crate::params::ParamsExt;
+use crate::params::ParamsExt as _;
 
 macro_rules! internal_index {
   ($name:ident) => {
@@ -75,14 +75,14 @@ macro_rules! internal_index {
 
 /// An opaque index identifying a table entry.
 ///
-/// Returned by [`PTab::insert`] and [`PTab::write`]; used to access or remove
-/// entries.
+/// Returned by [`PTab::insert`] and [`PTab::write`]. Used to access or remove
+/// the entry.
 ///
-/// # Generational Indices
+/// # Stale Indices
 ///
-/// Each index contains a generational component that changes when a slot is
-/// reused. This helps mitigate the [ABA problem]: a stale index from a removed
-/// entry will not match a new entry occupying the same slot.
+/// Each index carries a serial that changes when a slot is reused, but lookup
+/// and removal read only the slot bits. An index kept past its entry's removal
+/// reaches the entry that later occupies the same slot.
 ///
 /// # Examples
 ///
@@ -104,7 +104,6 @@ macro_rules! internal_index {
 /// [`PTab`]: crate::public::PTab
 /// [`PTab::insert`]: crate::public::PTab::insert
 /// [`PTab::write`]: crate::public::PTab::write
-/// [ABA problem]: https://en.wikipedia.org/wiki/ABA_problem
 #[derive(Clone, Copy, Hash, PartialEq, Eq, PartialOrd, Ord)]
 #[repr(transparent)]
 pub struct Detached {
@@ -112,18 +111,28 @@ pub struct Detached {
 }
 
 impl Detached {
-  /// Creates a [`Detached`] index from its raw bit representation.
+  /// Creates a [`Detached`] index from its raw bits.
   ///
   /// # Warning
   ///
-  /// An arbitrary bit pattern may not correspond to a valid table entry; using
-  /// it is safe but will return [`None`] or `false` from table operations.
+  /// Table operations use only the slot bits of the index. An arbitrary bit
+  /// pattern is safe to use, and reaches whatever entry occupies that slot, or
+  /// returns [`None`] or `false` when the slot is empty.
+  ///
+  /// # Examples
+  ///
+  /// ```
+  /// use ptab::Detached;
+  ///
+  /// let index = Detached::from_bits(7);
+  /// assert_eq!(index.into_bits(), 7);
+  /// ```
   #[inline]
   pub const fn from_bits(bits: usize) -> Self {
     Self { bits }
   }
 
-  /// Returns the raw bit representation of this index.
+  /// Returns the raw bits of this index.
   ///
   /// See [`from_bits`] to reconstruct an index.
   ///
@@ -133,7 +142,26 @@ impl Detached {
     self.bits
   }
 
-  /// Translates this index into its `(number, serial)` components.
+  /// Returns the `(number, serial)` components of this index under `P`.
+  ///
+  /// `number` is the allocation counter modulo [`Params::LENGTH`]. `serial` is
+  /// the counter divided by [`Params::LENGTH`], which grows each time the slot
+  /// is reused.
+  ///
+  /// # Examples
+  ///
+  /// ```
+  /// use ptab::{ConstParams, PTab};
+  ///
+  /// let table: PTab<i32, ConstParams<16>> = PTab::new();
+  /// let first = table.insert(1).unwrap();
+  /// let second = table.insert(2).unwrap();
+  ///
+  /// assert_eq!(first.decompose::<ConstParams<16>>(), (0, 0));
+  /// assert_eq!(second.decompose::<ConstParams<16>>(), (1, 0));
+  /// ```
+  ///
+  /// [`Params::LENGTH`]: crate::params::Params::LENGTH
   #[inline]
   pub const fn decompose<P>(self) -> (u32, u32)
   where
@@ -272,11 +300,11 @@ mod tests {
   use crate::index::Concrete;
   use crate::index::Detached;
   use crate::params::CACHE_LINE_SLOTS;
-  use crate::params::Params;
-  use crate::params::ParamsExt;
+  use crate::params::Params as _;
+  use crate::params::ParamsExt as _;
   use crate::utils::each_capacity;
 
-  #[expect(clippy::clone_on_copy)]
+  #[expect(clippy::clone_on_copy, reason = "exercises the `Clone` impl")]
   #[test]
   fn abstract_clone_copy() {
     let a: Abstract<()> = Abstract::new(123);
@@ -288,7 +316,7 @@ mod tests {
     assert_eq!(c, a);
   }
 
-  #[expect(clippy::clone_on_copy)]
+  #[expect(clippy::clone_on_copy, reason = "exercises the `Clone` impl")]
   #[test]
   fn concrete_clone_copy() {
     let a: Concrete<()> = Concrete::new(123);

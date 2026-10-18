@@ -43,8 +43,7 @@ const _: () = assert!(
 
 /// Compile-time configuration for a [`PTab`].
 ///
-/// Allows compile-time customization of table parameters. The simplest approach
-/// is through [`ConstParams`]:
+/// [`ConstParams`] is the simplest implementation:
 ///
 /// ```
 /// use ptab::{PTab, ConstParams};
@@ -56,14 +55,15 @@ const _: () = assert!(
 pub trait Params {
   /// The memory reclamation strategy used for removed entries.
   ///
-  /// See [`Collector`] for more info.
+  /// See [`Collector`] for more information.
   ///
   /// [`Collector`]: crate::reclaim::Collector
   type Collector: CollectorWeak;
 
-  /// The maximum number of entries the table can hold.
+  /// The number of slots in the table. The table holds this many entries, except
+  /// at [`Capacity::MAX`], where one slot is reserved and it holds one fewer.
   ///
-  /// See [`Capacity`] for more info.
+  /// See [`Capacity`] for more information.
   const LENGTH: Capacity = DefaultParams::LENGTH;
 }
 
@@ -73,10 +73,9 @@ pub trait Params {
 
 /// Derived parameters computed from [`Params`].
 ///
-/// Automatically implemented for all [`Params`] types. Provides computed
-/// constants used internally.
+/// Implemented for every [`Params`] type.
 ///
-/// # Example
+/// # Examples
 ///
 /// ```
 /// use ptab::{config::ParamsExt, ConstParams};
@@ -84,17 +83,27 @@ pub trait Params {
 /// println!("{:#?}", <ConstParams<1024> as ParamsExt>::debug());
 /// ```
 pub trait ParamsExt: Params + Sealed {
+  /// The number of cache-line blocks in each of the table's two arrays.
   const BLOCKS: NonZeroUsize = derive_blocks::<Self>();
+  /// The memory layout of one array allocation.
   const LAYOUT: Layout = derive_layout::<Self>();
+  /// The size of one array allocation in bytes.
   const MEMORY: usize = Self::BLOCKS.get().strict_mul(CACHE_LINE);
 
+  /// The number of bits needed to address every entry.
   const ID_MASK_BITS: u32 = Self::LENGTH.log2();
+  /// The mask selecting the entry bits of an index.
   const ID_MASK_ENTRY: usize = 1_usize.strict_shl(Self::ID_MASK_BITS).strict_sub(1);
+  /// The mask selecting the block bits of an index.
   const ID_MASK_BLOCK: usize = Self::BLOCKS.get().strict_sub(1);
+  /// The mask selecting the slot bits within a block.
   const ID_MASK_INDEX: usize = CACHE_LINE_SLOTS.strict_sub(1);
+  /// The shift that places the block bits of an index.
   const ID_SHIFT_BLOCK: u32 = Self::ID_MASK_INDEX.trailing_ones();
+  /// The shift that places the slot bits of an index.
   const ID_SHIFT_INDEX: u32 = Self::ID_MASK_BLOCK.trailing_ones();
 
+  /// Returns a value that prints the derived parameters.
   #[inline]
   fn debug() -> DebugParams<Self> {
     DebugParams {
@@ -102,11 +111,13 @@ pub trait ParamsExt: Params + Sealed {
     }
   }
 
+  /// Returns a guard from the configured collector.
   #[inline]
   fn guard() -> <Self::Collector as CollectorWeak>::Guard {
     <Self::Collector as CollectorWeak>::guard()
   }
 
+  /// Flushes the configured collector.
   #[inline]
   fn flush() {
     <Self::Collector as CollectorWeak>::flush();
@@ -126,10 +137,9 @@ impl<P> ParamsExt for P where P: Params + ?Sized {}
 // Debug Params
 // -----------------------------------------------------------------------------
 
-/// A helper type for displaying [`Params`] configuration.
+/// Displays the derived values of a [`Params`] type.
 ///
-/// Returned by [`ParamsExt::debug`]; implements [`Debug`] to show all derived
-/// configuration values.
+/// Returned by [`ParamsExt::debug()`]. Implements [`Debug`].
 #[derive(Clone, Copy)]
 pub struct DebugParams<P>
 where
@@ -164,9 +174,9 @@ where
 
 /// The default table configuration with [`Capacity::DEF`] slots.
 ///
-/// Used when creating a table without specifying a custom [`Params`] type.
+/// Used when a table does not name a [`Params`] type.
 ///
-/// # Example
+/// # Examples
 ///
 /// ```
 /// use ptab::{PTab, DefaultParams};
@@ -195,8 +205,7 @@ impl Params for DefaultParams {
 
 /// A [`Params`] implementation with compile-time configurable capacity.
 ///
-/// The recommended way to create tables with custom capacities. The capacity
-/// `N` is rounded up to the nearest power of two and clamped to
+/// `N` rounds up to a power of two and clamps to
 /// <code>[Capacity::MIN]..=[Capacity::MAX]</code>.
 ///
 /// # Examples
@@ -267,7 +276,7 @@ impl Capacity {
   /// The minimum supported capacity (2⁴ entries).
   pub const MIN: Self = Self(CapacityEnum::MIN);
 
-  /// The maximum supported capacity (2²⁷ entries).
+  /// The maximum supported capacity (2²⁷ slots, one of them reserved).
   pub const MAX: Self = Self(CapacityEnum::MAX);
 
   /// The default capacity (2²⁰ entries).
@@ -275,8 +284,7 @@ impl Capacity {
 
   /// Creates a `Capacity` from a `usize`.
   ///
-  /// Rounds up to the nearest power of two and clamps to
-  /// <code>[MIN]..=[MAX]</code>.
+  /// Rounds up to a power of two and clamps to <code>[MIN]..=[MAX]</code>.
   ///
   /// # Examples
   ///
@@ -402,7 +410,7 @@ impl From<Capacity> for usize {
 }
 
 // Most variants are only produced by transmuting a valid power of two.
-#[allow(dead_code)]
+#[allow(dead_code, reason = "variants are only built by transmute")]
 #[derive(Copy, Clone, PartialEq, Eq)]
 #[repr(usize)]
 enum CapacityEnum {
@@ -523,8 +531,8 @@ mod tests {
   use crate::params::CACHE_LINE_SLOTS;
   use crate::params::Capacity;
   use crate::params::DefaultParams;
-  use crate::params::Params;
-  use crate::params::ParamsExt;
+  use crate::params::Params as _;
+  use crate::params::ParamsExt as _;
   use crate::params::derive_blocks;
   use crate::params::derive_layout;
   use crate::utils::each_capacity;

@@ -16,7 +16,7 @@ use crate::padded::CachePadded;
 use crate::params::CACHE_LINE_SLOTS;
 use crate::params::Capacity;
 use crate::params::Params;
-use crate::params::ParamsExt;
+use crate::params::ParamsExt as _;
 use crate::reclaim;
 use crate::reclaim::Atomic as _;
 use crate::reclaim::CollectorWeak;
@@ -269,11 +269,15 @@ where
   }
 }
 
+#[expect(
+  clippy::non_send_fields_in_send_ty,
+  reason = "the impl exists to bound `T`: the fields are `!Send` only through the allocation `Table` owns"
+)]
 // SAFETY:
 // - `Table` may transfer ownership of entries across threads.
 // - This is only sound if `T: Send`.
-// - `P` is configuration only (capacity and layout), held as `PhantomData<fn(P)>`, so
-//   it needs no bound.
+// - `P` is only a type-level configuration: `Table` never stores a value of type `P`,
+//   only `PhantomData` markers, so it needs no bound.
 unsafe impl<T, P> Send for Table<T, P>
 where
   T: Send,
@@ -295,8 +299,10 @@ where
 {
 }
 
-// Unconditional because `Table` provides only shared access to `T` via `with`,
-// and epoch-based reclamation handles panic unwind safely.
+// Unconditional: `with` and `read` only give shared access to `T`, and a panic
+// in `with`'s closure or in `write`'s `init` leaves the table consistent (a
+// panicking `init` leaks its slot, see `PTab::write`). Reclamation is the
+// collector's concern and is unaffected by unwinding.
 impl<T, P> RefUnwindSafe for Table<T, P> where P: Params + ?Sized {}
 impl<T, P> UnwindSafe for Table<T, P> where P: Params + ?Sized {}
 
@@ -473,20 +479,24 @@ where
 
 /// Iterator over indices in a [`PTab`] with weak snapshot semantics.
 ///
-/// `WeakKeys` performs a lock-free scan of the underlying table and yields
-/// [`Detached`] indices for entries observed as present.
+/// Scans the table without locking and yields a [`Detached`] index for each
+/// entry observed as present. Returned by [`PTab::weak_keys()`].
 ///
 /// # Consistency Model
 ///
-/// This iterator is **weakly consistent**:
+/// The iterator is weakly consistent:
 ///
-/// - It does not guarantee a consistent snapshot.
-/// - It does not prevent concurrent insertions or removals.
-/// - It never yields an index that was never fully initialized.
+/// - It is not a snapshot and does not block insertions or removals.
+/// - It never yields an index whose entry was not fully initialized.
 /// - It may miss entries that were present when iteration began.
 /// - It may yield entries that are removed immediately afterward.
 ///
+/// Note: yielded indices have serial 0, so once a slot has been reused they
+/// differ from the index `insert` returned. Lookups use only the slot bits, so
+/// both reach the same slot.
+///
 /// [`PTab`]: crate::public::PTab
+/// [`PTab::weak_keys()`]: crate::public::PTab::weak_keys
 pub struct WeakKeys<'table, T, P>
 where
   P: Params + ?Sized,
@@ -544,14 +554,16 @@ where
 
       let ptr: Shared<'_, T, P> = {
         // SAFETY:
-        // - `Concrete<P>` guarantees `concrete_idx.get() < P::LENGTH`.
-        // - `self.array` points to a contiguous allocation of `P::LENGTH` elements.
+        // - `concrete_idx` is `Concrete::from_abstract` of `index < total`, with
+        //   `total == P::LENGTH`; that mapping stays inside `0..P::LENGTH`.
+        // - `self.array` is `table.readonly.data`, an `Array` of `P::LENGTH` elements.
         let raw: NonNull<Atomic<T, P>> = unsafe { self.array.add(concrete_idx.get()) };
 
         // SAFETY:
-        // - `raw` was derived from a valid allocation.
+        // - `raw` is in bounds of that allocation, which `ReadOnly::new` initialized and
+        //   which lives for `'table` (the `table` marker borrows the `Table`).
         // - The pointer is properly aligned for `Atomic<T>`.
-        // - The iterator only performs shared access.
+        // - Only shared access happens through it; mutation goes through atomics.
         let data: &Atomic<T, P> = unsafe { raw.as_ref() };
 
         data.read(Acquire, guard)
@@ -579,6 +591,10 @@ where
 #[cfg(not(any(loom, shuttle)))]
 #[cfg_attr(coverage_nightly, coverage(off))]
 #[cfg(test)]
+#[allow(
+  clippy::std_instead_of_alloc,
+  reason = "tests run with `std` and the `alloc` crate is not declared"
+)]
 mod tests {
   use core::time::Duration;
   use std::collections::HashSet;
@@ -594,8 +610,8 @@ mod tests {
   use crate::params::CACHE_LINE_SLOTS;
   use crate::params::Capacity;
   use crate::params::ConstParams;
-  use crate::params::Params;
-  use crate::params::ParamsExt;
+  use crate::params::Params as _;
+  use crate::params::ParamsExt as _;
   use crate::reclaim::Atomic as _;
   use crate::sync::atomic::AtomicUsize;
   use crate::sync::atomic::Ordering;

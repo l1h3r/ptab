@@ -9,7 +9,7 @@ use crate::alloc::dealloc;
 use crate::alloc::handle_alloc_error;
 use crate::index::Concrete;
 use crate::params::Params;
-use crate::params::ParamsExt;
+use crate::params::ParamsExt as _;
 
 /// A fixed-size array with cache-line-aligned allocation.
 #[repr(transparent)]
@@ -40,9 +40,15 @@ where
       // - The allocation performed by `new_uninit` reserves space for exactly
       //   `P::LENGTH` contiguous elements.
       // - The pointer returned by `as_non_null` is properly aligned for `T`.
+      let mut slot: NonNull<MaybeUninit<T>> = unsafe { this.as_non_null().add(index) };
+
+      // SAFETY:
+      // - `slot` is valid, aligned and in bounds, as argued above.
       // - We have exclusive access to the allocation, so creating a unique
       //   mutable reference is sound.
-      init(index, unsafe { this.as_non_null().add(index).as_mut() });
+      let entry: &mut MaybeUninit<T> = unsafe { slot.as_mut() };
+
+      init(index, entry);
     }
 
     // SAFETY: The loop above initializes every element in the allocation
@@ -134,8 +140,11 @@ where
     // SAFETY:
     // - The caller guarantees `index < P::LENGTH`.
     // - The allocation holds `P::LENGTH` contiguous elements.
-    // - The pointer is properly aligned and valid for reads.
-    unsafe { self.as_non_null().add(index).as_ref() }
+    // - The pointer is properly aligned.
+    let slot: NonNull<T> = unsafe { self.as_non_null().add(index) };
+
+    // SAFETY: `slot` is in bounds and valid for reads, as argued above.
+    unsafe { slot.as_ref() }
   }
 }
 
@@ -152,7 +161,7 @@ where
   /// results in immediate undefined behavior.
   #[inline]
   pub(crate) unsafe fn assume_init(self) -> Array<T, P> {
-    // SAFETY:
+    // Note:
     // - The caller guarantees that all elements are initialized.
     // - `Array<MaybeUninit<T>, P>` and `Array<T, P>` have identical layout.
     // - `ManuallyDrop` prevents `self` from being dropped, so the allocation is
@@ -189,7 +198,7 @@ mod tests {
   use crate::array::Array;
   use crate::index::Concrete;
   use crate::params::CACHE_LINE;
-  use crate::params::Params;
+  use crate::params::Params as _;
   use crate::utils::each_capacity;
 
   #[cfg_attr(loom, ignore = "loom does not run this test")]

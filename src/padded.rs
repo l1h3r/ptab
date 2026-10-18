@@ -54,10 +54,10 @@ pub(crate) struct CachePadded<T> {
   value: T,
 }
 
-// SAFETY: Transparent wrapper; inherits `Send` from `T`.
+// SAFETY: The only field is the wrapped value, so this is `Send` exactly when `T` is.
 unsafe impl<T: Send> Send for CachePadded<T> {}
 
-// SAFETY: Transparent wrapper; inherits `Sync` from `T`.
+// SAFETY: The only field is the wrapped value, so this is `Sync` exactly when `T` is.
 unsafe impl<T: Sync> Sync for CachePadded<T> {}
 
 impl<T> CachePadded<T> {
