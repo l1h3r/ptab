@@ -514,6 +514,48 @@ mod send_sync {
   const SEND_SYNC: () = ();
 }
 
+// Each `compile_fail` block has a passing twin that differs only in the type
+// under test, as in `send_sync`.
+#[cfg(doctest)]
+mod unwind_safe {
+  /// `RefCell<u8>` is not `RefUnwindSafe`, so `PTab` is neither
+  /// `RefUnwindSafe` nor `UnwindSafe`: a caught panic could leave the cell
+  /// half-updated behind a shared reference.
+  ///
+  /// ```compile_fail,E0277
+  /// use std::cell::RefCell;
+  /// use std::panic::RefUnwindSafe;
+  /// use ptab::PTab;
+  ///
+  /// fn assert_ref_unwind_safe<T: RefUnwindSafe>() {}
+  ///
+  /// assert_ref_unwind_safe::<PTab<RefCell<u8>>>();
+  /// ```
+  ///
+  /// ```compile_fail,E0277
+  /// use std::cell::RefCell;
+  /// use std::panic::UnwindSafe;
+  /// use ptab::PTab;
+  ///
+  /// fn assert_unwind_safe<T: UnwindSafe>() {}
+  ///
+  /// assert_unwind_safe::<PTab<RefCell<u8>>>();
+  /// ```
+  ///
+  /// ```
+  /// use std::panic::RefUnwindSafe;
+  /// use std::panic::UnwindSafe;
+  /// use std::sync::Mutex;
+  /// use ptab::PTab;
+  ///
+  /// fn assert_both<T: RefUnwindSafe + UnwindSafe>() {}
+  ///
+  /// assert_both::<PTab<u8>>();
+  /// assert_both::<PTab<Mutex<u8>>>();
+  /// ```
+  const NOT_UNWIND_SAFE_REFCELL: () = ();
+}
+
 #[cfg(test)]
 mod tests {
   use super::PTab;

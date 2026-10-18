@@ -298,12 +298,25 @@ where
 {
 }
 
-// Unconditional: `with` and `read` only give shared access to `T`, and a panic
-// in `with`'s closure or in `write`'s `init` leaves the table consistent (a
-// panicking `init` leaks its slot, see `PTab::write`). Reclamation is the
-// collector's concern and is unaffected by unwinding.
-impl<T, P> RefUnwindSafe for Table<T, P> where P: Params + ?Sized {}
-impl<T, P> UnwindSafe for Table<T, P> where P: Params + ?Sized {}
+// A panic in `with`'s closure or in `write`'s `init` leaves the table itself
+// consistent (a panicking `init` leaks its slot, see `PTab::write`). The table
+// hands out only `&T`, so after a caught panic code can still observe a `T`
+// that the panic left half-updated through interior mutability. Both impls
+// therefore require `T: RefUnwindSafe`: an owned table, like a shared one,
+// gives no other access to `T`.
+impl<T, P> RefUnwindSafe for Table<T, P>
+where
+  T: RefUnwindSafe,
+  P: Params + ?Sized,
+{
+}
+
+impl<T, P> UnwindSafe for Table<T, P>
+where
+  T: RefUnwindSafe,
+  P: Params + ?Sized,
+{
+}
 
 impl<T, P> Debug for Table<T, P>
 where
