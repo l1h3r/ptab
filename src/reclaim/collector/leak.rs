@@ -93,6 +93,13 @@ unsafe impl<T> Atomic<T> for Slot<T> {
   where
     T: 'static,
   {
+    // The slot must be empty. If it is not, the previous entry leaks, which is
+    // still sound in release builds.
+    debug_assert!(
+      self.0.load(Ordering::Relaxed).is_null(),
+      "Atomic<T> is occupied!"
+    );
+
     let mut uninit: Box<MaybeUninit<T>> = Box::new_uninit();
 
     init(&mut uninit);
@@ -170,6 +177,13 @@ unsafe impl<'guard, T> Shared<'guard, T> for Ptr<'guard, T> {
 
 #[cfg(test)]
 mod tests {
+  #[cfg(debug_assertions)]
+  use core::any::Any;
+  #[cfg(debug_assertions)]
+  use core::panic::AssertUnwindSafe;
+  #[cfg(debug_assertions)]
+  use std::panic;
+
   use super::*;
 
   #[test]
@@ -207,6 +221,32 @@ mod tests {
   }
 
   #[test]
+  #[cfg(debug_assertions)]
+  fn write_twice() {
+    let mut slot: Slot<u64> = Slot::null();
+    let guard: () = ();
+
+    slot.write(Ordering::Relaxed, |uninit: &mut MaybeUninit<u64>| {
+      uninit.write(1);
+    });
+
+    let result: Result<(), Box<dyn Any + Send>> = panic::catch_unwind(AssertUnwindSafe(|| {
+      slot.write(Ordering::Relaxed, |uninit: &mut MaybeUninit<u64>| {
+        uninit.write(2);
+      });
+    }));
+
+    let message: &str = result.unwrap_err().downcast_ref::<&str>().copied().unwrap();
+
+    assert!(message.contains("occupied"));
+    assert_eq!(slot.read(Ordering::Relaxed, &guard).as_ref(), Some(&1));
+
+    // SAFETY: the slot is the only owner of the first entry, freed once.
+    assert!(unsafe { slot.clear() });
+  }
+
+  #[test]
+  #[cfg(not(debug_assertions))]
   fn write_twice_keeps_second_and_reclaims_first() {
     let mut slot: Slot<u64> = Slot::null();
     let guard: () = ();
