@@ -61,7 +61,8 @@ pub trait Params {
   /// [`Collector`]: crate::reclaim::Collector
   type Collector: CollectorWeak;
 
-  /// The maximum number of entries the table can hold.
+  /// The number of slots in the table. The table holds this many entries, except
+  /// at [`Capacity::MAX`], where one slot is reserved and it holds one fewer.
   ///
   /// See [`Capacity`] for more info.
   const LENGTH: Capacity = DefaultParams::LENGTH;

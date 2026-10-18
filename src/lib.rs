@@ -91,9 +91,11 @@
 //!
 //! ## Memory Reclamation
 //!
-//! Removed entries are reclaimed using a pluggable memory management strategy.
-//! By default, epoch-based reclamation via [`sdd`] ensures safe concurrent
-//! access. In no-std environments, a leak-based fallback is available.
+//! Removed entries are reclaimed by the collector that `Params::Collector`
+//! selects, deferred while any reader may still hold a reference. With the
+//! `sdd` feature (the default) `DefaultParams` uses a collector that
+//! eventually reclaims every removed entry. Without it the default is a leaking
+//! collector, which never reclaims and does not support `remove`.
 //!
 //! See [`memory`] for reclamation trait details and custom implementations.
 //!
@@ -123,7 +125,6 @@
 //! [`memory`]: crate::memory
 //!
 //! [ABA problem]: https://en.wikipedia.org/wiki/ABA_problem
-//! [`sdd`]: https://docs.rs/sdd
 //!
 
 #![cfg_attr(not(feature = "std"), no_std)]

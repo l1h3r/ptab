@@ -105,9 +105,11 @@ where
     }
   }
 
-  /// Returns the maximum number of entries the table can hold.
+  /// Returns the number of entries the table can hold.
   ///
   /// Determined by [`Params::LENGTH`] and fixed for the lifetime of the table.
+  /// At [`Capacity::MAX`](crate::params::Capacity::MAX) one slot is reserved, so this is one less than
+  /// [`Params::LENGTH`].
   ///
   /// # Examples
   ///
@@ -234,8 +236,8 @@ where
   /// Removes the entry at the given index.
   ///
   /// Returns `true` if an entry was removed, `false` if already absent. The
-  /// slot becomes available for reuse immediately; memory is reclaimed via
-  /// epoch-based reclamation once no readers hold references.
+  /// slot becomes available for reuse immediately; memory is reclaimed by the
+  /// table's collector, deferred while any reader may still hold a reference.
   ///
   /// # Examples
   ///
@@ -251,7 +253,7 @@ where
   #[inline]
   pub fn remove(&self, index: Detached) -> bool
   where
-    P::Collector: Collector, // Enforce safe reclamation
+    P::Collector: Collector, // Removed entries must eventually be reclaimed
   {
     self.inner.remove(index)
   }
@@ -280,8 +282,8 @@ where
   /// Accesses an entry by index, applying a function to it.
   ///
   /// Returns [`None`] if no entry exists. The reference remains valid for the
-  /// callback's duration even under concurrent removal, due to epoch-based
-  /// reclamation.
+  /// callback's duration even under concurrent removal, because reclamation is
+  /// deferred while the callback holds its guard.
   ///
   /// # Examples
   ///

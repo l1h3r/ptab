@@ -15,8 +15,9 @@ const NO_TAG: sdd::Tag = sdd::Tag::None;
 /// [`sdd`]: https://crates.io/crates/sdd
 pub enum Sdd {}
 
-// SAFETY: `sdd` reclaims every evicted entry once no guard can still observe
-// it, so evicted entries are not permanently leaked.
+// SAFETY: `evict` drops the swapped-out `sdd::Owned`, which hands the entry to
+// `sdd`'s collector. `sdd` runs its destructor once no guard can still observe
+// it, as the collector advances, so evicted entries are not permanently leaked.
 unsafe impl Collector for Sdd {}
 
 impl CollectorWeak for Sdd {

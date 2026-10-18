@@ -276,8 +276,8 @@ where
 // SAFETY:
 // - `Table` may transfer ownership of entries across threads.
 // - This is only sound if `T: Send`.
-// - `P` is configuration only (capacity and layout), held as `PhantomData<fn(P)>`, so
-//   it needs no bound.
+// - `P` is only a type-level configuration: `Table` never stores a value of type `P`,
+//   only `PhantomData` markers, so it needs no bound.
 unsafe impl<T, P> Send for Table<T, P>
 where
   T: Send,
@@ -299,8 +299,10 @@ where
 {
 }
 
-// Unconditional because `Table` provides only shared access to `T` via `with`,
-// and epoch-based reclamation handles panic unwind safely.
+// Unconditional: `with` and `read` only give shared access to `T`, and a panic
+// in `with`'s closure or in `write`'s `init` leaves the table consistent (a
+// panicking `init` leaks its slot, see `PTab::write`). Reclamation is the
+// collector's concern and is unaffected by unwinding.
 impl<T, P> RefUnwindSafe for Table<T, P> where P: Params + ?Sized {}
 impl<T, P> UnwindSafe for Table<T, P> where P: Params + ?Sized {}
 
@@ -548,14 +550,16 @@ where
 
       let ptr: Shared<'_, T, P> = {
         // SAFETY:
-        // - `Concrete<P>` guarantees `concrete_idx.get() < P::LENGTH`.
-        // - `self.array` points to a contiguous allocation of `P::LENGTH` elements.
+        // - `concrete_idx` is `Concrete::from_abstract` of `index < total`, with
+        //   `total == P::LENGTH`; that mapping stays inside `0..P::LENGTH`.
+        // - `self.array` is `table.readonly.data`, an `Array` of `P::LENGTH` elements.
         let raw: NonNull<Atomic<T, P>> = unsafe { self.array.add(concrete_idx.get()) };
 
         // SAFETY:
-        // - `raw` was derived from a valid allocation.
+        // - `raw` is in bounds of that allocation, which `ReadOnly::new` initialized and
+        //   which lives for `'table` (the `table` marker borrows the `Table`).
         // - The pointer is properly aligned for `Atomic<T>`.
-        // - The iterator only performs shared access.
+        // - Only shared access happens through it; mutation goes through atomics.
         let data: &Atomic<T, P> = unsafe { raw.as_ref() };
 
         data.read(Acquire, guard)
