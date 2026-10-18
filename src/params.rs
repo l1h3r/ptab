@@ -463,6 +463,16 @@ const fn derive_blocks<P>() -> NonZeroUsize
 where
   P: Params + ?Sized,
 {
+  // Every cache line holds `CACHE_LINE_SLOTS` slots, so a table with fewer
+  // slots would have no whole block. `index.rs` relies on `LENGTH` being at
+  // least `CACHE_LINE_SLOTS` to keep every concrete index below `LENGTH`.
+  const {
+    assert!(
+      P::LENGTH.as_usize() >= CACHE_LINE_SLOTS,
+      "invalid params: `LENGTH` must be at least `CACHE_LINE_SLOTS`",
+    );
+  }
+
   // Determine the minimum valid size of table arrays.
   let Some(mem_bytes) = P::LENGTH.as_usize().checked_mul(size_of::<AtomicUsize>()) else {
     panic_for_blocks();
@@ -639,6 +649,15 @@ mod tests {
       let received: usize = P::BLOCKS.get() * CACHE_LINE_SLOTS;
 
       assert_eq!(expected, received);
+    });
+  }
+
+  #[test]
+  fn params_length_at_least_cache_line_slots() {
+    assert!(Capacity::MIN.as_usize() >= CACHE_LINE_SLOTS);
+
+    each_capacity!({
+      assert!(P::LENGTH.as_usize() >= CACHE_LINE_SLOTS);
     });
   }
 

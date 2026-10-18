@@ -53,6 +53,21 @@ where
   /// Constructs a new array with uninitialized contents.
   #[inline]
   pub(crate) fn new_uninit() -> Array<MaybeUninit<T>, P> {
+    // The allocation in `P::LAYOUT` holds `usize`-sized, `usize`-aligned slots.
+    // Checking `T` here, once per instantiation, rejects a wider element type
+    // before any memory is written through it. This is a compile-time check and
+    // generates no runtime code.
+    const {
+      assert!(
+        size_of::<T>() == size_of::<usize>(),
+        "array elements must be the same size as `usize`",
+      );
+      assert!(
+        align_of::<T>() == align_of::<usize>(),
+        "array elements must have the same alignment as `usize`",
+      );
+    }
+
     // SAFETY:
     // - `P::LAYOUT` describes a non-zero-sized allocation.
     // - Its size and alignment have been validated when constructing the
@@ -214,7 +229,10 @@ mod tests {
       });
 
       for index in 0..P::LENGTH.as_usize() {
-        assert_eq!(array.get(Concrete::<P>::new(index)), &index);
+        // SAFETY: `index` is in `0..P::LENGTH`.
+        let concrete: Concrete<P> = unsafe { Concrete::<P>::new(index) };
+
+        assert_eq!(array.get(concrete), &index);
       }
     });
   }

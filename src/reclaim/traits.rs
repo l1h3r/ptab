@@ -58,6 +58,203 @@ pub unsafe trait Collector: CollectorWeak {}
 /// - Reclamation of objects reachable by that guard must be deferred.
 /// - Returned [`Shared`] pointers are guaranteed valid for the guard lifetime.
 ///
+/// # Atomic Size
+///
+/// Every `Atomic<T>` is stored in a table array sized for `usize` elements, so
+/// it must have the same size and alignment as `usize`. A collector whose
+/// `Atomic<T>` is wider fails to build a table:
+///
+/// ```compile_fail
+/// use core::marker::PhantomData;
+/// use core::mem::MaybeUninit;
+/// use core::ptr;
+/// use core::sync::atomic::AtomicPtr;
+/// use core::sync::atomic::Ordering;
+///
+/// use ptab::PTab;
+/// use ptab::config::Capacity;
+/// use ptab::config::Params;
+/// use ptab::memory::Atomic;
+/// use ptab::memory::CollectorWeak;
+/// use ptab::memory::Shared;
+///
+/// pub struct Ptr<'guard, T> {
+///   pointer: *mut T,
+///   marker: PhantomData<&'guard T>,
+/// }
+///
+/// // SAFETY: `pointer` is null or a leaked `Box<T>`, so it stays valid for
+/// // `'guard`.
+/// unsafe impl<'guard, T> Shared<'guard, T> for Ptr<'guard, T> {
+///   fn is_null(&self) -> bool {
+///     self.pointer.is_null()
+///   }
+///
+///   fn as_ref(&self) -> Option<&'guard T> {
+///     // SAFETY: see the impl-level comment above.
+///     unsafe { self.pointer.as_ref() }
+///   }
+/// }
+///
+/// #[allow(dead_code)]
+/// pub struct Wide<T>(AtomicPtr<T>, [usize; 3]);
+///
+/// // SAFETY: this collector never frees a pointer it has stored.
+/// unsafe impl<T> Atomic<T> for Wide<T> {
+///   type Guard = ();
+///
+///   type Shared<'guard> = Ptr<'guard, T>
+///   where
+///     T: 'guard;
+///
+///   fn null() -> Self {
+///     Self(AtomicPtr::new(ptr::null_mut()), [0; 3])
+///   }
+///
+///   fn read<'guard>(&self, order: Ordering, _guard: &'guard Self::Guard) -> Self::Shared<'guard> {
+///     Ptr { pointer: self.0.load(order), marker: PhantomData }
+///   }
+///
+///   fn write(&self, order: Ordering, init: impl FnOnce(&mut MaybeUninit<T>))
+///   where
+///     T: 'static,
+///   {
+///     let mut uninit: Box<MaybeUninit<T>> = Box::new_uninit();
+///
+///     init(&mut uninit);
+///
+///     // SAFETY: `init` is required to fully initialize `uninit`.
+///     self.0.store(Box::into_raw(unsafe { uninit.assume_init() }), order);
+///   }
+///
+///   fn evict(&self, order: Ordering) -> bool {
+///     !self.0.swap(ptr::null_mut(), order).is_null()
+///   }
+///
+///   unsafe fn clear(&mut self) -> bool {
+///     !self.0.swap(ptr::null_mut(), Ordering::Relaxed).is_null()
+///   }
+/// }
+///
+/// pub enum Coll {}
+///
+/// impl CollectorWeak for Coll {
+///   type Guard = ();
+///   type Atomic<T> = Wide<T>;
+///
+///   fn guard() -> Self::Guard {}
+///
+///   fn flush() {}
+/// }
+///
+/// pub enum Custom {}
+///
+/// impl Params for Custom {
+///   type Collector = Coll;
+///
+///   const LENGTH: Capacity = Capacity::MIN;
+/// }
+///
+/// let table: PTab<u32, Custom> = PTab::new();
+/// assert!(table.is_empty());
+/// ```
+///
+/// The same collector with a one-word `Atomic<T>` builds and runs:
+///
+/// ```
+/// use core::marker::PhantomData;
+/// use core::mem::MaybeUninit;
+/// use core::ptr;
+/// use core::sync::atomic::AtomicPtr;
+/// use core::sync::atomic::Ordering;
+///
+/// use ptab::PTab;
+/// use ptab::config::Capacity;
+/// use ptab::config::Params;
+/// use ptab::memory::Atomic;
+/// use ptab::memory::CollectorWeak;
+/// use ptab::memory::Shared;
+///
+/// pub struct Ptr<'guard, T> {
+///   pointer: *mut T,
+///   marker: PhantomData<&'guard T>,
+/// }
+///
+/// // SAFETY: `pointer` is null or a leaked `Box<T>`, so it stays valid for
+/// // `'guard`.
+/// unsafe impl<'guard, T> Shared<'guard, T> for Ptr<'guard, T> {
+///   fn is_null(&self) -> bool {
+///     self.pointer.is_null()
+///   }
+///
+///   fn as_ref(&self) -> Option<&'guard T> {
+///     // SAFETY: see the impl-level comment above.
+///     unsafe { self.pointer.as_ref() }
+///   }
+/// }
+///
+/// pub struct Narrow<T>(AtomicPtr<T>);
+///
+/// // SAFETY: this collector never frees a pointer it has stored.
+/// unsafe impl<T> Atomic<T> for Narrow<T> {
+///   type Guard = ();
+///
+///   type Shared<'guard> = Ptr<'guard, T>
+///   where
+///     T: 'guard;
+///
+///   fn null() -> Self {
+///     Self(AtomicPtr::new(ptr::null_mut()))
+///   }
+///
+///   fn read<'guard>(&self, order: Ordering, _guard: &'guard Self::Guard) -> Self::Shared<'guard> {
+///     Ptr { pointer: self.0.load(order), marker: PhantomData }
+///   }
+///
+///   fn write(&self, order: Ordering, init: impl FnOnce(&mut MaybeUninit<T>))
+///   where
+///     T: 'static,
+///   {
+///     let mut uninit: Box<MaybeUninit<T>> = Box::new_uninit();
+///
+///     init(&mut uninit);
+///
+///     // SAFETY: `init` is required to fully initialize `uninit`.
+///     self.0.store(Box::into_raw(unsafe { uninit.assume_init() }), order);
+///   }
+///
+///   fn evict(&self, order: Ordering) -> bool {
+///     !self.0.swap(ptr::null_mut(), order).is_null()
+///   }
+///
+///   unsafe fn clear(&mut self) -> bool {
+///     !self.0.swap(ptr::null_mut(), Ordering::Relaxed).is_null()
+///   }
+/// }
+///
+/// pub enum Coll {}
+///
+/// impl CollectorWeak for Coll {
+///   type Guard = ();
+///   type Atomic<T> = Narrow<T>;
+///
+///   fn guard() -> Self::Guard {}
+///
+///   fn flush() {}
+/// }
+///
+/// pub enum Custom {}
+///
+/// impl Params for Custom {
+///   type Collector = Coll;
+///
+///   const LENGTH: Capacity = Capacity::MIN;
+/// }
+///
+/// let table: PTab<u32, Custom> = PTab::new();
+/// assert!(table.is_empty());
+/// ```
+///
 /// [`Atomic`]: crate::reclaim::CollectorWeak::Atomic
 /// [`Atomic::read()`]: crate::reclaim::Atomic::read
 /// [`Atomic::evict()`]: crate::reclaim::Atomic::evict
@@ -66,13 +263,6 @@ pub unsafe trait Collector: CollectorWeak {}
 /// [`Guard`]: crate::reclaim::CollectorWeak::Guard
 /// [`Shared`]: crate::reclaim::Atomic::Shared
 pub trait CollectorWeak {
-  /// Ensure `Atomic<T>` has the same size and alignment as a raw pointer.
-  #[doc(hidden)]
-  const ASSERT_ATOMIC: () = {
-    assert!(align_of::<Self::Atomic<()>>() == align_of::<usize>());
-    assert!(size_of::<Self::Atomic<()>>() == size_of::<usize>());
-  };
-
   /// A guard that keeps the current thread pinned.
   type Guard;
 
