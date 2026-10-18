@@ -47,6 +47,7 @@ pub(crate) mod alloc {
 #[cfg(not(any(loom, shuttle)))]
 pub(crate) mod sync {
   pub(crate) mod atomic {
+    pub(crate) use ::core::sync::atomic::AtomicPtr;
     pub(crate) use ::core::sync::atomic::AtomicU32;
     pub(crate) use ::core::sync::atomic::AtomicUsize;
     pub(crate) use ::core::sync::atomic::Ordering;
@@ -56,6 +57,7 @@ pub(crate) mod sync {
 #[cfg(loom)]
 pub(crate) mod sync {
   pub(crate) mod atomic {
+    pub(crate) use ::loom::sync::atomic::AtomicPtr;
     pub(crate) use ::loom::sync::atomic::AtomicU32;
     pub(crate) use ::loom::sync::atomic::AtomicUsize;
     pub(crate) use ::loom::sync::atomic::Ordering;
@@ -85,6 +87,38 @@ pub(crate) mod sync {
       #[inline]
       fn deref(&self) -> &Self::Target {
         &self.inner
+      }
+    }
+
+    /// Shuttle's `AtomicPtr` is wider than a pointer. Boxing it keeps slots
+    /// one word wide, as the array layout requires.
+    #[repr(transparent)]
+    pub(crate) struct AtomicPtr<T> {
+      inner: Box<::shuttle::sync::atomic::AtomicPtr<T>>,
+    }
+
+    impl<T> AtomicPtr<T> {
+      #[inline]
+      pub(crate) fn new(value: *mut T) -> Self {
+        Self {
+          inner: Box::new(::shuttle::sync::atomic::AtomicPtr::new(value)),
+        }
+      }
+    }
+
+    impl<T> ::core::ops::Deref for AtomicPtr<T> {
+      type Target = ::shuttle::sync::atomic::AtomicPtr<T>;
+
+      #[inline]
+      fn deref(&self) -> &Self::Target {
+        &self.inner
+      }
+    }
+
+    impl<T> ::core::ops::DerefMut for AtomicPtr<T> {
+      #[inline]
+      fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.inner
       }
     }
 

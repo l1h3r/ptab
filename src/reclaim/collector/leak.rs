@@ -3,8 +3,6 @@ use core::mem;
 use core::mem::MaybeUninit;
 use core::ptr;
 use core::ptr::NonNull;
-use core::sync::atomic::AtomicPtr;
-use core::sync::atomic::Ordering;
 
 #[allow(
   redundant_imports,
@@ -15,6 +13,8 @@ use crate::alloc::Box;
 use crate::reclaim::Atomic;
 use crate::reclaim::CollectorWeak;
 use crate::reclaim::Shared;
+use crate::sync::atomic::AtomicPtr;
+use crate::sync::atomic::Ordering;
 
 /// A reclamation strategy that leaks evicted entries.
 pub enum Leak {}
@@ -121,7 +121,12 @@ unsafe impl<T> Atomic<T> for Slot<T> {
   #[inline]
   unsafe fn clear(&mut self) -> bool {
     // Null the slot so a repeated `clear` finds it empty instead of freeing twice.
-    if let Some(ptr) = NonNull::new(mem::replace(self.0.get_mut(), ptr::null_mut())) {
+    #[cfg(not(loom))]
+    let old: *mut T = mem::replace(self.0.get_mut(), ptr::null_mut());
+    #[cfg(loom)]
+    let old: *mut T = self.0.with_mut(|ptr| mem::replace(ptr, ptr::null_mut()));
+
+    if let Some(ptr) = NonNull::new(old) {
       // SAFETY:
       // - Only `write` stores a non-null pointer, and it comes from
       //   `Box::into_raw`.
@@ -175,7 +180,9 @@ unsafe impl<'guard, T> Shared<'guard, T> for Ptr<'guard, T> {
   }
 }
 
-#[cfg(test)]
+// The tests build slots outside a loom or shuttle model, which those atomics
+// reject.
+#[cfg(all(test, not(any(loom, shuttle))))]
 mod tests {
   #[cfg(debug_assertions)]
   use core::any::Any;
