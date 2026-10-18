@@ -135,7 +135,7 @@ complexity = { level = "deny", priority = -1 }
 perf = { level = "deny", priority = -1 }
 pedantic = { level = "deny", priority = -1 }
 restriction = { level = "allow", priority = -1 }
-nursery = { level = "allow", priority = -1 }
+nursery = { level = "deny", priority = -1 }
 cargo = { level = "deny", priority = -1 }
 
 # Misc. Noise

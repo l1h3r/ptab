@@ -269,6 +269,10 @@ where
   }
 }
 
+#[expect(
+  clippy::non_send_fields_in_send_ty,
+  reason = "the impl exists to bound `T`: the fields are `!Send` only through the allocation `Table` owns"
+)]
 // SAFETY:
 // - `Table` may transfer ownership of entries across threads.
 // - This is only sound if `T: Send`.
