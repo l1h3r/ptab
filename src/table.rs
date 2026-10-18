@@ -649,6 +649,22 @@ mod tests {
     };
   }
 
+  fn debug_values(table: &Table<usize, MinParams>) -> Vec<usize> {
+    let debug: String = format!("{table:?}");
+    let inner: &str = debug.trim_start_matches('{').trim_end_matches('}');
+
+    let mut values: Vec<usize> = Vec::new();
+
+    for entry in inner.split(", ").filter(|entry| !entry.is_empty()) {
+      let (_, value) = entry.split_once(": ").unwrap();
+
+      values.push(value.parse().unwrap());
+    }
+
+    values.sort_unstable();
+    values
+  }
+
   // ---------------------------------------------------------------------------
   // Internals
   // ---------------------------------------------------------------------------
@@ -814,10 +830,12 @@ mod tests {
   // - Every `Permit` is honored in `acquire_slot`.
   // - All keys are unique.
   // - The table count stays in bounds.
+  // - Released slots are reused, and the count matches acquires minus releases.
   #[test]
   fn slot_churn() {
     static PERMITS: AtomicUsize = AtomicUsize::new(0);
     static UNIQUES: AtomicUsize = AtomicUsize::new(0);
+    static RELEASES: AtomicUsize = AtomicUsize::new(0);
 
     let table: Arc<Table<usize, DefParams>> = Arc::new(Table::new());
     let barrier: Arc<Barrier> = Arc::new(Barrier::new(THREADS + 1));
@@ -831,8 +849,8 @@ mod tests {
       let table: Arc<Table<usize, DefParams>> = Arc::clone(&table);
 
       threads.push(thread::spawn(move || {
-        let mut track: Vec<usize> = Vec::with_capacity(capacity);
-        let mut index: usize = 0;
+        let mut track: Vec<usize> = Vec::with_capacity(capacity * 4);
+        let mut released: usize = 0;
 
         barrier.wait();
 
@@ -840,19 +858,22 @@ mod tests {
           for _ in 0..capacity {
             if let Some(permit) = table.reserve_slot() {
               track.push(table.acquire_slot(permit).get());
-              index += 1;
 
               assert!(table.len() <= capacity as u32);
-              assert!(PERMITS.fetch_add(1, Ordering::Relaxed) <= capacity);
+              assert!(PERMITS.fetch_add(1, Ordering::Relaxed) < capacity);
 
               UNIQUES.fetch_add(1, Ordering::Relaxed);
             }
 
-            if index.is_multiple_of(2)
-              && let Some(index) = track[index..].first()
+            // Release the oldest slot this thread still holds, so slots are reused.
+            if track.len().is_multiple_of(2)
+              && let Some(key) = track.get(released)
             {
-              table.release_slot(Abstract::new(*index));
               PERMITS.fetch_sub(1, Ordering::Relaxed);
+              table.release_slot(Abstract::new(*key));
+              released += 1;
+
+              RELEASES.fetch_add(1, Ordering::Relaxed);
             }
 
             thread::yield_now();
@@ -872,7 +893,12 @@ mod tests {
     }
 
     assert_eq!(uniques.len(), UNIQUES.load(Ordering::Relaxed));
-    assert_eq!(table.cap(), PERMITS.load(Ordering::Relaxed));
+    assert_ne!(RELEASES.load(Ordering::Relaxed), 0);
+    assert_eq!(
+      table.len() as usize,
+      UNIQUES.load(Ordering::Relaxed) - RELEASES.load(Ordering::Relaxed),
+    );
+    assert_eq!(table.len() as usize, PERMITS.load(Ordering::Relaxed));
   }
 
   // ---------------------------------------------------------------------------
@@ -1239,6 +1265,102 @@ mod tests {
     let debug: String = format!("{:?}", table.weak_keys(DefParams::guard()));
 
     assert_eq!(debug, "WeakKeys(..)");
+  }
+
+  // Scenario: Slots are removed and filled again, several times over.
+  // Expected: `len`, `weak_keys` and `Debug` agree on the live entries, and the
+  // key `insert` returned reads back its value.
+  #[test]
+  fn slot_reuse_len_weak_keys_debug() {
+    let table: Table<usize, MinParams> = Table::new();
+    let guard: Guard<MinParams> = MinParams::guard();
+    let cap: usize = table.cap();
+
+    let mut live: Vec<(Detached, usize)> = Vec::with_capacity(cap);
+    let mut next: usize = 0;
+
+    for _ in 0..cap {
+      live.push((table.insert(next).unwrap(), next));
+      next += 1;
+    }
+
+    for round in 0..3 {
+      // Remove a different pair of entries each round, then refill the table.
+      for _ in 0..2 {
+        let (key, _) = live.remove(round);
+
+        assert!(table.remove(key));
+      }
+
+      assert_eq!(table.len() as usize, cap - 2);
+      assert_eq!(table.weak_keys(MinParams::guard()).count(), cap - 2);
+      assert_eq!(debug_values(&table).len(), cap - 2);
+
+      for _ in 0..2 {
+        live.push((table.insert(next).unwrap(), next));
+        next += 1;
+      }
+
+      let mut expected: Vec<usize> = live.iter().map(|(_, value)| *value).collect();
+
+      expected.sort_unstable();
+
+      assert_eq!(table.len() as usize, cap);
+      assert_eq!(table.weak_keys(MinParams::guard()).count(), cap);
+      assert_eq!(debug_values(&table), expected);
+
+      for (key, value) in &live {
+        assert_eq!(table.read(*key, &guard), Some(*value));
+      }
+    }
+  }
+
+  // Scenario: A full table has one entry removed and nothing inserted after.
+  // Expected: `len`, `weak_keys` and `Debug` all report one fewer entry.
+  #[test]
+  fn slot_reuse_partial() {
+    let table: Table<usize, MinParams> = Table::new();
+    let cap: usize = table.cap();
+
+    let mut keys: Vec<Detached> = Vec::with_capacity(cap);
+
+    for index in 0..cap {
+      keys.push(table.insert(index).unwrap());
+    }
+
+    assert!(table.remove(keys[0]));
+
+    let mut expected: Vec<usize> = (1..cap).collect();
+
+    expected.sort_unstable();
+
+    assert_eq!(table.len() as usize, cap - 1);
+    assert_eq!(table.weak_keys(MinParams::guard()).count(), cap - 1);
+    assert_eq!(debug_values(&table), expected);
+  }
+
+  // Scenario: A table is filled, emptied and filled again.
+  // Expected: Once emptied, `Debug` is `{}` and `weak_keys` yields nothing.
+  #[test]
+  fn slot_reuse_remove_all() {
+    let table: Table<usize, MinParams> = Table::new();
+    let cap: usize = table.cap();
+
+    for _ in 0..2 {
+      let mut keys: Vec<Detached> = Vec::with_capacity(cap);
+
+      for index in 0..cap {
+        keys.push(table.insert(index).unwrap());
+      }
+
+      for key in keys {
+        assert!(table.remove(key));
+      }
+
+      assert_eq!(table.len(), 0);
+      assert_eq!(table.weak_keys(MinParams::guard()).next(), None);
+      assert_eq!(format!("{table:?}"), "{}");
+    }
   }
 
   // Scenario: The table has a single block due to min capacity.
