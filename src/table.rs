@@ -597,6 +597,7 @@ mod tests {
   use crate::params::Params;
   use crate::params::ParamsExt;
   use crate::reclaim::Atomic as _;
+  use crate::reclaim::Shared as _;
   use crate::sync::atomic::AtomicUsize;
   use crate::sync::atomic::Ordering;
   use crate::table;

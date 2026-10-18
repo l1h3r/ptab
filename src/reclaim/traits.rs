@@ -104,7 +104,73 @@ pub trait CollectorWeak {
 // -----------------------------------------------------------------------------
 
 /// An atomic pointer that can be safely shared between threads.
-pub trait Atomic<T> {
+///
+/// Safe code cannot implement this trait, and cannot call its methods on the
+/// raw `AtomicPtr` or `sdd::AtomicOwned` types; the collectors built into
+/// `ptab` implement it on their own newtypes.
+///
+/// ```compile_fail,E0200
+/// use ptab::memory::Atomic;
+///
+/// struct Custom;
+///
+/// impl<T> Atomic<T> for Custom {}
+/// ```
+///
+/// ```compile_fail,E0277
+/// use core::sync::atomic::AtomicPtr;
+/// use core::sync::atomic::Ordering;
+///
+/// use ptab::memory::Atomic;
+///
+/// let ptr: AtomicPtr<u64> = AtomicPtr::new(0x10 as *mut u64);
+/// let _ = Atomic::read(&ptr, Ordering::Relaxed, &());
+/// ```
+///
+/// ```compile_fail,E0277
+/// use ptab::memory::Atomic;
+///
+/// let raw: sdd::AtomicOwned<u64> = sdd::AtomicOwned::null();
+/// let guard = sdd::Guard::new();
+/// let _ = Atomic::read(&raw, core::sync::atomic::Ordering::Relaxed, &guard);
+/// ```
+///
+/// Entries are not `Sync` unless the value is `Send + Sync`, for both built-in
+/// collectors:
+///
+/// ```compile_fail,E0277
+/// use core::cell::Cell;
+///
+/// use ptab::memory::CollectorWeak;
+///
+/// fn assert_sync<S: Sync>() {}
+///
+/// assert_sync::<<ptab::memory::collector::Leak as CollectorWeak>::Atomic<Cell<u8>>>();
+/// ```
+///
+/// ```compile_fail,E0277
+/// use core::cell::Cell;
+///
+/// use ptab::memory::CollectorWeak;
+///
+/// fn assert_sync<S: Sync>() {}
+///
+/// assert_sync::<<ptab::memory::collector::Sdd as CollectorWeak>::Atomic<Cell<u8>>>();
+/// ```
+///
+/// # Safety
+///
+/// This is an **unsafe trait**: implementing it asserts the invariants below,
+/// which safe callers rely on.
+///
+/// - [`Atomic::read()`] returns a pointer that is null or refers to a live `T`
+///   for the whole `'guard` lifetime.
+/// - [`Atomic::write()`] stores a `T` the collector owns and reclaims.
+/// - `Atomic<T>` is `Send` and `Sync` only where `T` allows it.
+///
+/// [`Atomic::read()`]: Atomic::read
+/// [`Atomic::write()`]: Atomic::write
+pub unsafe trait Atomic<T> {
   /// A guard that keeps the current thread pinned.
   type Guard;
 
@@ -154,7 +220,9 @@ pub trait Atomic<T> {
   ///
   /// # Safety
   ///
-  /// See [`ptr::drop_in_place`] for minimum safety requirements.
+  /// See [`ptr::drop_in_place`] for minimum safety requirements. No reader may
+  /// hold a pointer to the value, and the slot is left empty, so a second call
+  /// returns `false`.
   ///
   /// [`ptr::drop_in_place`]: core::ptr::drop_in_place
   unsafe fn clear(&mut self) -> bool;
@@ -167,7 +235,34 @@ pub trait Atomic<T> {
 /// A pointer to an object protected by the epoch GC.
 ///
 /// The pointer is valid for use only during the lifetime `'guard`.
-pub trait Shared<'guard, T> {
+///
+/// Like [`Atomic`], this trait must be implemented with `unsafe impl`. A safe
+/// impl is rejected:
+///
+/// ```compile_fail,E0200
+/// use ptab::memory::Shared;
+///
+/// struct Custom;
+///
+/// impl<'guard, T> Shared<'guard, T> for Custom {
+///   fn is_null(&self) -> bool {
+///     true
+///   }
+///
+///   fn as_ref(&self) -> Option<&'guard T> {
+///     None
+///   }
+/// }
+/// ```
+///
+/// # Safety
+///
+/// This is an **unsafe trait**. Implementing it asserts that [`Shared::as_ref()`]
+/// returns `None` for null, and otherwise a reference to a live `T` that
+/// remains valid for `'guard`.
+///
+/// [`Shared::as_ref()`]: Shared::as_ref
+pub unsafe trait Shared<'guard, T> {
   /// Returns `true` if the pointer is null.
   fn is_null(&self) -> bool;
 
