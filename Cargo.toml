@@ -141,6 +141,7 @@ cargo = { level = "deny", priority = -1 }
 # Misc. Noise
 cast_possible_truncation = "allow"
 doc_markdown = "allow"
+empty_enums = "allow"
 manual_map = "allow"
 must_use_candidate = "allow"
 option_if_let_else = "allow"
