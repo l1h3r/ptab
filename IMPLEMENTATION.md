@@ -21,7 +21,6 @@ Traditional approaches using locks or lock-free structures with reference counti
 
 3. **Generational indices**: Reused slots produce different indices to mitigate ABA problems in concurrent algorithms.
 
-4. **Globally sequential allocation**: New indices are assigned in a consistent order across all threads, preserving the property that comparing two indices reveals their relative creation order.
 
 ## Architecture Overview
 
