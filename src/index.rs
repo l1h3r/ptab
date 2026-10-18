@@ -287,7 +287,7 @@ where
   let source: usize = detached.into_bits() & P::ID_MASK_ENTRY;
 
   // SAFETY:
-  // - `LENGTH` is a power of two, so `ID_MASK_ENTRY` is `LENGTH - 1`.
+  // - `Capacity` only holds powers of two, so `ID_MASK_ENTRY` is `LENGTH - 1`.
   // - The masked `source` is therefore strictly less than `P::LENGTH`.
   unsafe { Concrete::new(source) }
 }
@@ -303,9 +303,9 @@ where
   value += (abstract_idx.get() >> P::ID_SHIFT_INDEX) & P::ID_MASK_INDEX;
 
   // SAFETY:
-  // - `ID_MASK_BLOCK` is `BLOCKS - 1` and `ID_MASK_INDEX` is
-  //   `CACHE_LINE_SLOTS - 1`, so `value` is at most
-  //   `(BLOCKS - 1) * CACHE_LINE_SLOTS + CACHE_LINE_SLOTS - 1`.
+  // - `ID_MASK_BLOCK` is `BLOCKS - 1`, `ID_MASK_INDEX` is
+  //   `CACHE_LINE_SLOTS - 1` and `ID_SHIFT_BLOCK` is `log2(CACHE_LINE_SLOTS)`,
+  //   so `value` is at most `(BLOCKS - 1) * CACHE_LINE_SLOTS + CACHE_LINE_SLOTS - 1`.
   // - `derive_blocks` rejects `LENGTH < CACHE_LINE_SLOTS` (params.rs), so
   //   `BLOCKS * CACHE_LINE_SLOTS == LENGTH` and `value < P::LENGTH`.
   unsafe { Concrete::new(value) }

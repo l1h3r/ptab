@@ -354,19 +354,25 @@ pub trait CollectorWeak {
 ///
 /// - [`Atomic::read()`] returns a pointer that is null or refers to a live `T`
 ///   for the whole `'guard` lifetime.
-/// - [`Atomic::write()`] stores a `T` the collector owns and reclaims.
+/// - [`Atomic::write()`] stores a `T` the implementation owns. [`Atomic::evict()`]
+///   hands it to the collector, which may leak it, and [`Atomic::clear()`]
+///   drops it.
+/// - [`Atomic::clear()`] leaves the slot null, so a second call drops nothing.
 /// - The table derives `Send` and `Sync` from `T` alone, whatever the auto
 ///   traits of the implementing type are. When `T: Send`, a value of it may be
 ///   moved to and dropped on another thread. When `T: Send + Sync`, every
 ///   `&self` method may be called from several threads at once.
 ///
+/// [`Atomic::clear()`]: Atomic::clear
+/// [`Atomic::evict()`]: Atomic::evict
 /// [`Atomic::read()`]: Atomic::read
 /// [`Atomic::write()`]: Atomic::write
 pub unsafe trait Atomic<T> {
   /// A guard that keeps the current thread pinned.
   type Guard;
 
-  /// A pointer to an object protected by the epoch GC.
+  /// A pointer to a value the collector keeps alive while the guard it was
+  /// read under is held.
   ///
   /// The pointer is valid for use only during the lifetime `'guard`.
   type Shared<'guard>: Shared<'guard, T>
@@ -408,15 +414,15 @@ pub unsafe trait Atomic<T> {
   /// deemed safe to destroy the value.
   fn evict(&self, order: Ordering) -> bool;
 
-  /// Executes the destructor (if any) of the pointed-to value.
+  /// Drops the stored value, if any, at once instead of deferring it.
+  ///
+  /// Returns `true` if a value was dropped. The slot is left null, so a second
+  /// call returns `false`.
   ///
   /// # Safety
   ///
-  /// See [`ptr::drop_in_place`] for minimum safety requirements. No reader may
-  /// hold a pointer to the value, and the slot is left empty, so a second call
-  /// returns `false`.
-  ///
-  /// [`ptr::drop_in_place`]: core::ptr::drop_in_place
+  /// No reader may still hold a pointer read from this slot, because the value
+  /// is dropped without waiting for guards.
   unsafe fn clear(&mut self) -> bool;
 }
 
@@ -424,7 +430,8 @@ pub unsafe trait Atomic<T> {
 // Shared Ptr
 // -----------------------------------------------------------------------------
 
-/// A pointer to an object protected by the epoch GC.
+/// A pointer to a value the collector keeps alive while the guard it was read
+/// under is held.
 ///
 /// The pointer is valid for use only during the lifetime `'guard`.
 ///

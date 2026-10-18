@@ -54,15 +54,17 @@ unsafe impl<T: Send> Send for Slot<T> {}
 // SAFETY:
 // - `read` hands out `&T` to any thread that holds `&Slot<T>`, so `T: Sync`
 //   is required.
-// - `write` and `evict` take `&self` and move a `T` in or out, so `T: Send` is
-//   required.
+// - `write` takes `&self` and moves a `T` in from the calling thread, which
+//   another thread may later drop through `clear`, so `T: Send` is required.
 unsafe impl<T: Send + Sync> Sync for Slot<T> {}
 
 // SAFETY:
-// - `Slot<T>` is `#[repr(transparent)]` over `AtomicPtr<T>`, so `read` returns
-//   either null or a pointer produced by `Box::into_raw` in `write`.
-// - Such a pointer refers to a live `T` until `evict` or `clear` removes it,
-//   and `Ptr` borrows the guard for `'guard`.
+// - Only `write` stores a non-null pointer, from `Box::into_raw`, so `read`
+//   returns null or a pointer to a live `T`.
+// - `evict` leaks the value, so it stays live. Only `clear` frees it, and its
+//   contract excludes readers. `Ptr` borrows the guard for `'guard`.
+// - `clear` nulls the slot before it frees the value.
+// - The `Send` and `Sync` impls above bound `T` as the trait requires.
 unsafe impl<T> Atomic<T> for Slot<T> {
   type Guard = ();
 
@@ -114,12 +116,11 @@ unsafe impl<T> Atomic<T> for Slot<T> {
     // Null the slot so a repeated `clear` finds it empty instead of freeing twice.
     if let Some(ptr) = NonNull::new(mem::replace(self.0.get_mut(), ptr::null_mut())) {
       // SAFETY:
-      // - `ptr` was previously created by `Box::into_raw`, so it originated
-      //   from a valid `Box<T>` allocation.
-      // - We have exclusive access via `&mut self`, so no concurrent access to
-      //   the pointer can occur.
-      // - Reconstructing the `Box<T>` transfers ownership back and will drop
-      //   the value and free the allocation exactly once.
+      // - Only `write` stores a non-null pointer, and it comes from
+      //   `Box::into_raw`.
+      // - The slot is already null, so this `Box` is rebuilt and dropped once.
+      // - The caller guarantees no reader still holds the pointer (`clear`'s
+      //   `# Safety`).
       drop(unsafe { Box::from_raw(ptr.as_ptr()) });
       true
     } else {
@@ -145,7 +146,8 @@ pub struct Ptr<'guard, T> {
 // SAFETY:
 // - `Ptr` is only built by `Slot::read`, so `pointer` is null or came from
 //   `Box::into_raw` in `write`, and does not outlive the guard.
-// - `as_ref` returns `&'guard T` for a pointer that is still live for `'guard`.
+// - `evict` leaks the value and `clear` requires that no reader holds it, so
+//   the pointer stays live for `'guard`.
 unsafe impl<'guard, T> Shared<'guard, T> for Ptr<'guard, T> {
   #[inline]
   fn is_null(&self) -> bool {
@@ -158,7 +160,8 @@ unsafe impl<'guard, T> Shared<'guard, T> for Ptr<'guard, T> {
     // - `self.pointer` is either null or points to a fully initialized `T`
     //   written via `Atomic::write`.
     // - The pointer originates from `Box::into_raw`, so it is valid and
-    //   properly aligned for `T`.
+    //   properly aligned for `T`, and it stays live for `'guard` (see the
+    //   `Shared` impl).
     // - Only shared references to `T` are created, so aliasing rules are not
     //   violated.
     unsafe { self.pointer.as_ref() }

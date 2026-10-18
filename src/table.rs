@@ -254,10 +254,9 @@ where
     }
 
     for entry in self.readonly.data.as_mut_slice() {
-      // SAFETY:
-      // - `Drop` provides exclusive access via `&mut self`, so no concurrent
-      //   access can occur.
-      // - Each slot is dropped at most once.
+      // SAFETY: `clear` requires that no reader holds a pointer from the slot.
+      // Every reader borrows the table (`with`, `read`, `WeakKeys`), and
+      // `&mut self` rules out any live borrow.
       if unsafe { entry.clear() } {
         count = count.wrapping_sub(1);
 

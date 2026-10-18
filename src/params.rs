@@ -486,7 +486,7 @@ where
     panic_for_blocks();
   };
 
-  // Round up so we have an even number of slots.
+  // Round up to a whole number of cache lines.
   let Some(mem_align) = mem_bytes.checked_next_multiple_of(CACHE_LINE) else {
     panic_for_blocks();
   };

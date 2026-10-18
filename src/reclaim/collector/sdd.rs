@@ -131,10 +131,10 @@ unsafe impl<T> Atomic<T> for SddAtomic<T> {
 
     if let Some(value) = entry.into_owned(Ordering::Relaxed) {
       // SAFETY:
-      // - `entry.into_owned` transfers exclusive ownership of the value.
-      // - If `Some(value)` is returned, we are the unique owner.
-      // - Calling `drop_in_place` drops the contained `T` exactly once and
-      //   reclaims the associated allocation.
+      // - `drop_in_place` requires that no `sdd::Ptr` points to the value. The
+      //   caller of `clear` guarantees that no reader still holds one.
+      // - `mem::take` left the slot null and `into_owned` took the value, so it
+      //   is dropped once.
       unsafe {
         value.drop_in_place();
       }
@@ -155,8 +155,8 @@ unsafe impl<T> Atomic<T> for SddAtomic<T> {
 pub struct SddPtr<'guard, T>(sdd::Ptr<'guard, T>);
 
 // SAFETY:
-// - `SddPtr` is only built by `SddAtomic::read`, from an entry written with no
-//   tag bits set. Tags are never set through this crate's API.
+// - `SddPtr` is only built by `SddAtomic::read`. Every store into `SddAtomic`
+//   uses `NO_TAG` (`null` and `mem::take` store none), so no tag bits are set.
 // - `as_ref` only returns `&'guard T` for a pointer that sdd keeps alive for the
 //   guard.
 unsafe impl<'guard, T> Shared<'guard, T> for SddPtr<'guard, T> {
@@ -174,7 +174,8 @@ unsafe impl<'guard, T> Shared<'guard, T> for SddPtr<'guard, T> {
     //   valid and aligned for `T`, and sdd keeps it alive for `'guard`.
     // - Only shared references to `T` are created, so aliasing rules are not
     //   violated.
-    // - `self` does not have any tag bits set.
+    // - `self` has no tag bits set, because every store into `SddAtomic` uses
+    //   `NO_TAG`.
     unsafe { self.0.as_ref_unchecked() }
   }
 }

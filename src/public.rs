@@ -369,6 +369,9 @@ where
   }
 }
 
+/// Lists each present entry under the index of its slot with serial 0, as
+/// [`WeakKeys`] yields it. Once a slot has been reused, that index differs from
+/// the one `insert` returned.
 impl<T, P> Debug for PTab<T, P>
 where
   T: Debug,
