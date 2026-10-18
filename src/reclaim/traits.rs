@@ -96,7 +96,7 @@ pub unsafe trait Collector: CollectorWeak {}
 ///   }
 /// }
 ///
-/// #[allow(dead_code)]
+/// #[allow(dead_code, reason = "only the size matters")]
 /// pub struct Wide<T>(AtomicPtr<T>, [usize; 3]);
 ///
 /// // SAFETY: this collector never frees a pointer it has stored.
@@ -314,15 +314,15 @@ pub trait CollectorWeak {
 /// use ptab::memory::Atomic;
 ///
 /// let ptr: AtomicPtr<u64> = AtomicPtr::new(0x10 as *mut u64);
-/// let _ = Atomic::read(&ptr, Ordering::Relaxed, &());
+/// Atomic::read(&ptr, Ordering::Relaxed, &());
 /// ```
 ///
 /// ```compile_fail,E0277
 /// use ptab::memory::Atomic;
 ///
 /// let raw: sdd::AtomicOwned<u64> = sdd::AtomicOwned::null();
-/// let guard = sdd::Guard::new();
-/// let _ = Atomic::read(&raw, core::sync::atomic::Ordering::Relaxed, &guard);
+/// let guard: sdd::Guard = sdd::Guard::new();
+/// Atomic::read(&raw, core::sync::atomic::Ordering::Relaxed, &guard);
 /// ```
 ///
 /// Entries are not `Sync` unless the value is `Send + Sync`, for both built-in
@@ -350,13 +350,15 @@ pub trait CollectorWeak {
 ///
 /// # Safety
 ///
-/// This is an **unsafe trait**: implementing it asserts the invariants below,
-/// which safe callers rely on.
+/// Implementing this trait asserts the following, which the table relies on:
 ///
 /// - [`Atomic::read()`] returns a pointer that is null or refers to a live `T`
 ///   for the whole `'guard` lifetime.
 /// - [`Atomic::write()`] stores a `T` the collector owns and reclaims.
-/// - `Atomic<T>` is `Send` and `Sync` only where `T` allows it.
+/// - The table derives `Send` and `Sync` from `T` alone, whatever the auto
+///   traits of the implementing type are. When `T: Send`, a value of it may be
+///   moved to and dropped on another thread. When `T: Send + Sync`, every
+///   `&self` method may be called from several threads at once.
 ///
 /// [`Atomic::read()`]: Atomic::read
 /// [`Atomic::write()`]: Atomic::write

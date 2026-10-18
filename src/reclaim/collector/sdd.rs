@@ -63,9 +63,14 @@ impl CollectorWeak for Sdd {
 pub struct SddAtomic<T>(sdd::AtomicOwned<T>);
 
 // SAFETY:
-// - `SddAtomic<T>` has no impl of its own; it is `Send` and `Sync` exactly when
-//   `sdd::AtomicOwned<T>` is, which sdd implements for `T: Send + Sync`.
-// - The `Atomic` impl below never adds a way to share or move the entry.
+// - `read` loads an entry stored by `write`, which sdd keeps alive while the
+//   guard that loaded it is held.
+// - `write` stores an `sdd::Owned<T>`. `evict` hands it back to sdd, which
+//   drops it once no guard can observe it; `clear` drops it directly under its
+//   own `# Safety` contract.
+// - Every `&self` method goes through `sdd::AtomicOwned`, which is safe to use
+//   from several threads for `T: Send + Sync`. Moving it with `T: Send` moves an
+//   owned `T`, as a `Box` would.
 unsafe impl<T> Atomic<T> for SddAtomic<T> {
   type Guard = sdd::Guard;
 
@@ -162,8 +167,8 @@ unsafe impl<'guard, T> Shared<'guard, T> for SddPtr<'guard, T> {
     // SAFETY:
     // - `self` is either null or points to a fully initialized `T` written via
     //   `Atomic::write`.
-    // - The pointer originates from `Box::into_raw`, so it is valid and
-    //   properly aligned for `T`.
+    // - The pointer comes from the `sdd::Owned` that `write` stored, so it is
+    //   valid and aligned for `T`, and sdd keeps it alive for `'guard`.
     // - Only shared references to `T` are created, so aliasing rules are not
     //   violated.
     // - `self` does not have any tag bits set.
