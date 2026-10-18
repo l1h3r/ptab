@@ -452,24 +452,29 @@ impl CapacityEnum {
     panic!("invalid params: `CACHE_LINE_SLOTS` exceeds 32")
   };
 
-  #[cfg(miri)]
+  #[cfg(ptab_miri)]
   const MAX: Self = Self::Capacity1Shl10;
 
-  #[cfg(all(not(miri), test, not(feature = "slow")))]
+  #[cfg(all(not(ptab_miri), test, not(feature = "slow")))]
   const MAX: Self = Self::Capacity1Shl16;
 
-  #[cfg(not(any(miri, all(test, not(feature = "slow")))))]
+  #[cfg(not(any(ptab_miri, all(test, not(feature = "slow")))))]
   const MAX: Self = Self::Capacity1Shl27;
 
-  #[cfg(miri)]
+  #[cfg(ptab_miri)]
   const DEF: Self = Self::Capacity1Shl5;
 
-  #[cfg(all(not(miri), test, not(feature = "slow")))]
+  #[cfg(all(not(ptab_miri), test, not(feature = "slow")))]
   const DEF: Self = Self::Capacity1Shl10;
 
-  #[cfg(not(any(miri, all(test, not(feature = "slow")))))]
+  #[cfg(not(any(ptab_miri, all(test, not(feature = "slow")))))]
   const DEF: Self = Self::Capacity1Shl20;
 }
+
+// Miri runs ptab's own tests with reduced sizes only when `--cfg ptab_miri` is set. Without it,
+// they would build full-size tables. Downstream builds never see `cfg(test)`, so they are unaffected.
+#[cfg(all(test, miri, not(ptab_miri)))]
+compile_error!("under Miri, ptab's own tests need `RUSTFLAGS=\"--cfg ptab_miri\"`");
 
 // -----------------------------------------------------------------------------
 // Misc. Utilities
