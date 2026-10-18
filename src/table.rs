@@ -580,12 +580,14 @@ where
 #[cfg_attr(coverage_nightly, coverage(off))]
 #[cfg(test)]
 mod tests {
+  #[cfg(feature = "sdd")]
   use core::time::Duration;
   use std::collections::HashSet;
   use std::sync::Arc;
   use std::sync::Barrier;
   use std::thread;
   use std::thread::JoinHandle;
+  #[cfg(feature = "sdd")]
   use std::time::Instant;
 
   use crate::index::Abstract;
@@ -1183,6 +1185,8 @@ mod tests {
     assert_eq!(DropMe::load(), 0);
   }
 
+  // The `Leak` collector never reclaims removed entries, so only `sdd` drops them.
+  #[cfg(feature = "sdd")]
   #[test]
   fn drop_half_full() {
     make_drop!(DropMe);

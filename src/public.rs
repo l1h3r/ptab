@@ -240,6 +240,8 @@ where
   /// # Examples
   ///
   /// ```
+  /// # #[cfg(feature = "sdd")]
+  /// # fn main() {
   /// use ptab::PTab;
   ///
   /// let table: PTab<i32> = PTab::new();
@@ -247,6 +249,9 @@ where
   ///
   /// assert!(table.remove(idx));  // Entry removed
   /// assert!(!table.remove(idx)); // Already gone
+  /// # }
+  /// # #[cfg(not(feature = "sdd"))]
+  /// # fn main() {}
   /// ```
   #[inline]
   pub fn remove(&self, index: Detached) -> bool
@@ -263,6 +268,8 @@ where
   /// # Examples
   ///
   /// ```
+  /// # #[cfg(feature = "sdd")]
+  /// # fn main() {
   /// use ptab::PTab;
   ///
   /// let table: PTab<i32> = PTab::new();
@@ -271,6 +278,9 @@ where
   /// assert!(table.exists(idx));
   /// table.remove(idx);
   /// assert!(!table.exists(idx));
+  /// # }
+  /// # #[cfg(not(feature = "sdd"))]
+  /// # fn main() {}
   /// ```
   #[inline]
   pub fn exists(&self, index: Detached) -> bool {
