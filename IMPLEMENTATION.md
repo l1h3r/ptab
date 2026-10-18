@@ -91,7 +91,7 @@ Slots per line depend on the target. `CACHE_LINE_SLOTS` holds the value.
 
 ## Capacity
 
-`Capacity` is a power of two from `Capacity::MIN` (2^4) to `Capacity::MAX` (2^27). `Capacity::new` rounds up and clamps. The block count is derived at compile time, and a capacity whose layout does not fit in `isize::MAX` bytes fails to compile.
+`Capacity` is a power of two from `Capacity::MIN` (2^4, or one cache line of slots where a line holds more) to `Capacity::MAX` (2^27). `Capacity::new` rounds up and clamps. The block count is derived at compile time, and a capacity whose layout does not fit in `isize::MAX` bytes fails to compile.
 
 The table is full when `entries` reaches `LENGTH`. `insert` increments `entries` first and returns `None` after undoing the increment when the table is full.
 

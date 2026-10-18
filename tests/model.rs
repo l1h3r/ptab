@@ -42,7 +42,7 @@ use core::cell::RefCell;
 
 use ptab::Detached;
 
-type PTab = ptab::PTab<usize, ptab::ConstParams<{ 1 << 4 }>>;
+type PTab = ptab::PTab<usize, ptab::ConstParams<{ ptab::Capacity::MIN.as_usize() }>>;
 
 // -----------------------------------------------------------------------------
 // Trace
