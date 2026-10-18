@@ -7,7 +7,7 @@
 
 A lock-free, fixed-capacity concurrent table for read-heavy workloads.
 
-Ported from the Erlang/OTP process table. Lookups use atomic loads and write no shared memory, so readers do not contend. Consecutive inserts land in different cache lines. Capacity and the reclamation strategy are set at compile time.
+Ported from the Erlang/OTP process table. Lookups use atomic loads and write nothing to the table. Consecutive inserts land in different cache lines. Capacity and the reclamation strategy are set at compile time.
 
 ## Example
 
