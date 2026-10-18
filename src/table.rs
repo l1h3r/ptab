@@ -595,6 +595,8 @@ where
   reason = "tests run with `std` and the `alloc` crate is not declared"
 )]
 mod tests {
+  use core::fmt::Result as FmtResult;
+  use core::fmt::Write;
   #[cfg(feature = "sdd")]
   use core::time::Duration;
   use std::collections::HashSet;
@@ -666,20 +668,49 @@ mod tests {
     };
   }
 
-  fn debug_values(table: &Table<usize, MinParams>) -> Vec<usize> {
-    let debug: String = format!("{table:?}");
-    let inner: &str = debug.trim_start_matches('{').trim_end_matches('}');
+  // Collects the values of a `{key: value, ..}` map as `Debug` writes it, with
+  // no intermediate string. Keys are skipped: `Debug` rebuilds generation 0
+  // keys after slot reuse.
+  struct DebugValues {
+    values: Vec<usize>,
+    value: Option<usize>,
+  }
 
-    let mut values: Vec<usize> = Vec::new();
+  impl Write for DebugValues {
+    fn write_str(&mut self, s: &str) -> FmtResult {
+      for byte in s.bytes() {
+        match byte {
+          b':' => self.value = Some(0),
+          b'0'..=b'9' => {
+            if let Some(value) = self.value.as_mut() {
+              *value = *value * 10 + usize::from(byte - b'0');
+            }
+          }
+          b',' | b'}' => {
+            if let Some(value) = self.value.take() {
+              self.values.push(value);
+            }
+          }
+          _ => {
+            // do nothing
+          }
+        }
+      }
 
-    for entry in inner.split(", ").filter(|entry| !entry.is_empty()) {
-      let (_, value) = entry.split_once(": ").unwrap();
-
-      values.push(value.parse().unwrap());
+      Ok(())
     }
+  }
 
-    values.sort_unstable();
-    values
+  fn debug_values(table: &Table<usize, MinParams>) -> Vec<usize> {
+    let mut debug: DebugValues = DebugValues {
+      values: Vec::with_capacity(table.cap()),
+      value: None,
+    };
+
+    write!(debug, "{table:?}").unwrap();
+
+    debug.values.sort_unstable();
+    debug.values
   }
 
   // ---------------------------------------------------------------------------
