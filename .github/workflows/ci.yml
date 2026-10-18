@@ -104,6 +104,8 @@ jobs:
       - run: cargo miri test
         env:
           MIRIFLAGS: -Zmiri-strict-provenance
+          RUSTFLAGS: --cfg ptab_miri
+          RUSTDOCFLAGS: --cfg ptab_miri
 
   fmt:
     name: Format
