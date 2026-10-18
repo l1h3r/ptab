@@ -319,7 +319,7 @@ pub trait CollectorWeak {
 ///
 #[cfg_attr(
   feature = "sdd",
-  doc = r#"
+  doc = r"
 ```compile_fail,E0277
 use ptab::memory::Atomic;
 
@@ -327,7 +327,7 @@ let raw: sdd::AtomicOwned<u64> = sdd::AtomicOwned::null();
 let guard: sdd::Guard = sdd::Guard::new();
 Atomic::read(&raw, core::sync::atomic::Ordering::Relaxed, &guard);
 ```
-"#
+"
 )]
 ///
 /// Entries are not `Sync` unless the value is `Send + Sync`, for both built-in
@@ -345,7 +345,7 @@ Atomic::read(&raw, core::sync::atomic::Ordering::Relaxed, &guard);
 ///
 #[cfg_attr(
   feature = "sdd",
-  doc = r#"
+  doc = r"
 ```compile_fail,E0277
 use core::cell::Cell;
 
@@ -355,7 +355,7 @@ fn assert_sync<S: Sync>() {}
 
 assert_sync::<<ptab::memory::collector::Sdd as CollectorWeak>::Atomic<Cell<u8>>>();
 ```
-"#
+"
 )]
 ///
 /// # Safety
