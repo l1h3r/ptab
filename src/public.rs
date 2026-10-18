@@ -245,6 +245,8 @@ where
   /// # Examples
   ///
   /// ```
+  /// # #[cfg(feature = "sdd")]
+  /// # fn main() {
   /// use ptab::PTab;
   ///
   /// let table: PTab<i32> = PTab::new();
@@ -252,6 +254,9 @@ where
   ///
   /// assert!(table.remove(idx));  // Entry removed
   /// assert!(!table.remove(idx)); // Already gone
+  /// # }
+  /// # #[cfg(not(feature = "sdd"))]
+  /// # fn main() {}
   /// ```
   #[inline]
   pub fn remove(&self, index: Detached) -> bool
@@ -268,6 +273,8 @@ where
   /// # Examples
   ///
   /// ```
+  /// # #[cfg(feature = "sdd")]
+  /// # fn main() {
   /// use ptab::PTab;
   ///
   /// let table: PTab<i32> = PTab::new();
@@ -276,6 +283,9 @@ where
   /// assert!(table.exists(idx));
   /// table.remove(idx);
   /// assert!(!table.exists(idx));
+  /// # }
+  /// # #[cfg(not(feature = "sdd"))]
+  /// # fn main() {}
   /// ```
   #[inline]
   pub fn exists(&self, index: Detached) -> bool {
@@ -359,6 +369,9 @@ where
   }
 }
 
+/// Lists each present entry under the index of its slot with serial 0, as
+/// [`WeakKeys`] yields it. Once a slot has been reused, that index differs from
+/// the one `insert` returned.
 impl<T, P> Debug for PTab<T, P>
 where
   T: Debug,
@@ -380,6 +393,125 @@ where
   fn default() -> Self {
     Self::new()
   }
+}
+
+// Each `compile_fail` block has a passing twin that differs only in the type
+// under test, so a failure cannot come from anything but the missing auto trait.
+#[cfg(doctest)]
+mod send_sync {
+  /// `Rc<u8>` is neither `Send` nor `Sync`, so `PTab` is not `Send`.
+  ///
+  /// ```compile_fail,E0277
+  /// use std::rc::Rc;
+  /// use ptab::PTab;
+  ///
+  /// fn assert_send<T: Send>() {}
+  ///
+  /// assert_send::<PTab<Rc<u8>>>();
+  /// ```
+  ///
+  /// ```
+  /// use ptab::PTab;
+  ///
+  /// fn assert_send<T: Send>() {}
+  ///
+  /// assert_send::<PTab<u8>>();
+  /// ```
+  const NOT_SEND_RC: () = ();
+
+  /// `Rc<u8>` is neither `Send` nor `Sync`, so `PTab` is not `Sync`.
+  ///
+  /// ```compile_fail,E0277
+  /// use std::rc::Rc;
+  /// use ptab::PTab;
+  ///
+  /// fn assert_sync<T: Sync>() {}
+  ///
+  /// assert_sync::<PTab<Rc<u8>>>();
+  /// ```
+  ///
+  /// ```
+  /// use ptab::PTab;
+  ///
+  /// fn assert_sync<T: Sync>() {}
+  ///
+  /// assert_sync::<PTab<u8>>();
+  /// ```
+  const NOT_SYNC_RC: () = ();
+
+  /// `Cell<u8>` is `Send` but not `Sync`. `PTab` requires `T: Send` to be
+  /// `Send`, so it is `Send`, and it is not `Sync` because `Sync` needs
+  /// `T: Sync` as well.
+  ///
+  /// ```
+  /// use std::cell::Cell;
+  /// use ptab::PTab;
+  ///
+  /// fn assert_send<T: Send>() {}
+  ///
+  /// assert_send::<PTab<Cell<u8>>>();
+  /// ```
+  ///
+  /// ```compile_fail,E0277
+  /// use std::cell::Cell;
+  /// use ptab::PTab;
+  ///
+  /// fn assert_sync<T: Sync>() {}
+  ///
+  /// assert_sync::<PTab<Cell<u8>>>();
+  /// ```
+  ///
+  /// ```
+  /// use ptab::PTab;
+  ///
+  /// fn assert_sync<T: Sync>() {}
+  ///
+  /// assert_sync::<PTab<u8>>();
+  /// ```
+  const SEND_NOT_SYNC_CELL: () = ();
+
+  /// `MutexGuard<u8>` is `Sync` but not `Send`, so `PTab` is neither.
+  ///
+  /// ```compile_fail,E0277
+  /// use std::sync::MutexGuard;
+  /// use ptab::PTab;
+  ///
+  /// fn assert_send<T: Send>() {}
+  ///
+  /// assert_send::<PTab<MutexGuard<'static, u8>>>();
+  /// ```
+  ///
+  /// ```compile_fail,E0277
+  /// use std::sync::MutexGuard;
+  /// use ptab::PTab;
+  ///
+  /// fn assert_sync<T: Sync>() {}
+  ///
+  /// assert_sync::<PTab<MutexGuard<'static, u8>>>();
+  /// ```
+  ///
+  /// ```
+  /// use std::sync::MutexGuard;
+  ///
+  /// fn assert_sync<T: Sync>() {}
+  ///
+  /// assert_sync::<MutexGuard<'static, u8>>();
+  /// ```
+  const NOT_SEND_GUARD: () = ();
+
+  /// Types that are `Send` and `Sync` make `PTab` both.
+  ///
+  /// ```
+  /// use std::sync::Mutex;
+  /// use ptab::PTab;
+  ///
+  /// fn assert_send_sync<T: Send + Sync>() {}
+  ///
+  /// assert_send_sync::<PTab<u64>>();
+  /// assert_send_sync::<PTab<String>>();
+  /// assert_send_sync::<PTab<Mutex<u8>>>();
+  /// ```
+  const SEND_SYNC: () = ();
 }
 
 #[cfg(test)]

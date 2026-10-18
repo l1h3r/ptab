@@ -22,14 +22,6 @@ macro_rules! internal_index {
       P: ?Sized,
     {
       #[inline]
-      pub(crate) const fn new(source: usize) -> Self {
-        Self {
-          source,
-          marker: ::core::marker::PhantomData,
-        }
-      }
-
-      #[inline]
       pub(crate) const fn get(self) -> usize {
         self.source
       }
@@ -208,6 +200,19 @@ internal_index!(Abstract);
 
 impl<P> Abstract<P>
 where
+  P: ?Sized,
+{
+  #[inline]
+  pub(crate) const fn new(source: usize) -> Self {
+    Self {
+      source,
+      marker: ::core::marker::PhantomData,
+    }
+  }
+}
+
+impl<P> Abstract<P>
+where
   P: Params + ?Sized,
 {
   #[inline]
@@ -226,6 +231,26 @@ impl<P> Concrete<P>
 where
   P: Params + ?Sized,
 {
+  /// Creates a [`Concrete`] index from a slot number.
+  ///
+  /// # Safety
+  ///
+  /// `source` must be strictly less than `P::LENGTH`. A larger value makes
+  /// `Array::get` read past the end of the table. The check is a
+  /// `debug_assert!`, so release builds rely on the caller.
+  #[inline]
+  pub(crate) const unsafe fn new(source: usize) -> Self {
+    debug_assert!(
+      source < P::LENGTH.as_usize(),
+      "Concrete::new requires that the index is in bounds",
+    );
+
+    Self {
+      source,
+      marker: ::core::marker::PhantomData,
+    }
+  }
+
   #[inline]
   pub(crate) const fn from_abstract(other: Abstract<P>) -> Self {
     abstract_to_concrete(other)
@@ -259,7 +284,12 @@ const fn detached_to_concrete<P>(detached: Detached) -> Concrete<P>
 where
   P: Params + ?Sized,
 {
-  Concrete::new(detached.into_bits() & P::ID_MASK_ENTRY)
+  let source: usize = detached.into_bits() & P::ID_MASK_ENTRY;
+
+  // SAFETY:
+  // - `Capacity` only holds powers of two, so `ID_MASK_ENTRY` is `LENGTH - 1`.
+  // - The masked `source` is therefore strictly less than `P::LENGTH`.
+  unsafe { Concrete::new(source) }
 }
 
 /// Converts an [`Abstract`] sequential index to a [`Concrete`] cache-aware index.
@@ -271,7 +301,14 @@ where
   let mut value: usize = 0;
   value += (abstract_idx.get() & P::ID_MASK_BLOCK) << P::ID_SHIFT_BLOCK;
   value += (abstract_idx.get() >> P::ID_SHIFT_INDEX) & P::ID_MASK_INDEX;
-  Concrete::new(value)
+
+  // SAFETY:
+  // - `ID_MASK_BLOCK` is `BLOCKS - 1`, `ID_MASK_INDEX` is
+  //   `CACHE_LINE_SLOTS - 1` and `ID_SHIFT_BLOCK` is `log2(CACHE_LINE_SLOTS)`,
+  //   so `value` is at most `(BLOCKS - 1) * CACHE_LINE_SLOTS + CACHE_LINE_SLOTS - 1`.
+  // - `derive_blocks` rejects `LENGTH < CACHE_LINE_SLOTS` (params.rs), so
+  //   `BLOCKS * CACHE_LINE_SLOTS == LENGTH` and `value < P::LENGTH`.
+  unsafe { Concrete::new(value) }
 }
 
 /// Converts an [`Abstract`] sequential index to a [`Detached`] index.
@@ -300,6 +337,7 @@ mod tests {
   use crate::index::Concrete;
   use crate::index::Detached;
   use crate::params::CACHE_LINE_SLOTS;
+  use crate::params::DefaultParams;
   use crate::params::Params as _;
   use crate::params::ParamsExt as _;
   use crate::utils::each_capacity;
@@ -319,9 +357,10 @@ mod tests {
   #[expect(clippy::clone_on_copy, reason = "exercises the `Clone` impl")]
   #[test]
   fn concrete_clone_copy() {
-    let a: Concrete<()> = Concrete::new(123);
-    let b: Concrete<()> = a.clone();
-    let c: Concrete<()> = b;
+    // SAFETY: `7` is less than every `Capacity`, which is at least 16.
+    let a: Concrete<DefaultParams> = unsafe { Concrete::new(7) };
+    let b: Concrete<DefaultParams> = a.clone();
+    let c: Concrete<DefaultParams> = b;
 
     assert_eq!(a, b);
     assert_eq!(b, c);
@@ -338,8 +377,9 @@ mod tests {
 
   #[test]
   fn concrete_debug_transparency() {
-    let value: usize = 123;
-    let index: Concrete<()> = Concrete::new(value);
+    let value: usize = 7;
+    // SAFETY: `7` is less than every `Capacity`, which is at least 16.
+    let index: Concrete<DefaultParams> = unsafe { Concrete::new(value) };
 
     assert_eq!(format!("{index:?}"), format!("{value:?}"));
   }

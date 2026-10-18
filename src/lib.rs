@@ -15,6 +15,8 @@
 //! # Usage
 //!
 //! ```
+//! # #[cfg(feature = "sdd")]
+//! # fn main() {
 //! use ptab::PTab;
 //!
 //! // Create a table with default capacity
@@ -32,6 +34,9 @@
 //!
 //! // The entry is gone
 //! assert!(!table.exists(index));
+//! # }
+//! # #[cfg(not(feature = "sdd"))]
+//! # fn main() {}
 //! ```
 //!
 //! # Configuration
@@ -64,6 +69,8 @@
 //! All operations on [`PTab`] are thread-safe and lock-free.
 //!
 //! ```no_run
+//! # #[cfg(feature = "sdd")]
+//! # fn main() {
 //! use ptab::{PTab, ConstParams};
 //! use std::sync::Arc;
 //! use std::thread;
@@ -86,6 +93,9 @@
 //! for handle in handles {
 //!   handle.join().unwrap();
 //! }
+//! # }
+//! # #[cfg(not(feature = "sdd"))]
+//! # fn main() {}
 //! ```
 //!
 //! ## Memory Reclamation
@@ -123,7 +133,8 @@
 //! [`memory`]: crate::memory
 //! [`implementation`]: crate::implementation
 
-#![cfg_attr(not(feature = "std"), no_std)]
+// Unit tests link `std` for `Vec`, `String` and `format!`, even in the alloc-only build.
+#![cfg_attr(all(not(feature = "std"), not(test)), no_std)]
 #![cfg_attr(coverage_nightly, feature(coverage_attribute))]
 #![cfg_attr(docsrs, feature(doc_cfg))]
 

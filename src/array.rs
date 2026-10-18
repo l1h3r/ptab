@@ -37,9 +37,10 @@ where
     for index in 0..P::LENGTH.as_usize() {
       // SAFETY:
       // - `index` is strictly less than `P::LENGTH`.
-      // - The allocation performed by `new_uninit` reserves space for exactly
-      //   `P::LENGTH` contiguous elements.
-      // - The pointer returned by `as_non_null` is properly aligned for `T`.
+      // - `new_uninit` allocates `P::LAYOUT`, which holds `P::LENGTH`
+      //   `usize`-sized slots, and its const check makes `T` `usize`-sized.
+      // - `P::LAYOUT` is aligned to `CACHE_LINE`, a multiple of `size_of::<usize>()`,
+      //   and `T` has the alignment of `usize`, so the pointer is aligned for `T`.
       let mut slot: NonNull<MaybeUninit<T>> = unsafe { this.as_non_null().add(index) };
 
       // SAFETY:
@@ -59,10 +60,23 @@ where
   /// Constructs a new array with uninitialized contents.
   #[inline]
   pub(crate) fn new_uninit() -> Array<MaybeUninit<T>, P> {
-    // SAFETY:
-    // - `P::LAYOUT` describes a non-zero-sized allocation.
-    // - Its size and alignment have been validated when constructing the
-    //   associated `Params` implementation.
+    // The allocation in `P::LAYOUT` holds `usize`-sized, `usize`-aligned slots.
+    // Checking `T` here, once per instantiation, rejects a wider element type
+    // before any memory is written through it. This is a compile-time check and
+    // generates no runtime code.
+    const {
+      assert!(
+        size_of::<T>() == size_of::<usize>(),
+        "array elements must be the same size as `usize`",
+      );
+      assert!(
+        align_of::<T>() == align_of::<usize>(),
+        "array elements must have the same alignment as `usize`",
+      );
+    }
+
+    // SAFETY: `P::LAYOUT` has a non-zero size, because `derive_layout` asserts
+    // `P::MEMORY != 0`.
     let raw: *mut u8 = unsafe { alloc(P::LAYOUT) };
 
     Array {
@@ -117,8 +131,8 @@ where
   /// Returns a reference to the element at `index`.
   #[inline]
   pub(crate) const fn get(&self, index: Concrete<P>) -> &T {
-    // SAFETY: `Concrete<P>` ensures that the underlying index is strictly less
-    //         than `P::LENGTH`, so it is within bounds.
+    // SAFETY: Every `Concrete<P>` comes from the unsafe `Concrete::new`, whose
+    // callers guarantee the index is strictly less than `P::LENGTH`.
     unsafe { self.get_unchecked(index.get()) }
   }
 
@@ -143,7 +157,8 @@ where
     // - The pointer is properly aligned.
     let slot: NonNull<T> = unsafe { self.as_non_null().add(index) };
 
-    // SAFETY: `slot` is in bounds and valid for reads, as argued above.
+    // SAFETY: `slot` is in bounds and valid for reads, as argued above, and
+    // every element of an `Array<T, P>` is initialized (`new`, `assume_init`).
     unsafe { slot.as_ref() }
   }
 }
@@ -223,7 +238,10 @@ mod tests {
       });
 
       for index in 0..P::LENGTH.as_usize() {
-        assert_eq!(array.get(Concrete::<P>::new(index)), &index);
+        // SAFETY: `index` is in `0..P::LENGTH`.
+        let concrete: Concrete<P> = unsafe { Concrete::<P>::new(index) };
+
+        assert_eq!(array.get(concrete), &index);
       }
     });
   }
