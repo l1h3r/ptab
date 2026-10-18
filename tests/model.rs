@@ -1,13 +1,15 @@
+//! Loom and shuttle model tests.
+
 #![cfg(any(loom, shuttle))]
 
 #[cfg(loom)]
 mod driver {
-  pub use ::loom::sync::Arc;
-  pub use ::loom::thread;
-  pub use ::loom::thread::JoinHandle;
+  pub(crate) use ::loom::sync::Arc;
+  pub(crate) use ::loom::thread;
+  pub(crate) use ::loom::thread::JoinHandle;
 
   #[inline]
-  pub fn check<F>(f: F)
+  pub(crate) fn check<F>(f: F)
   where
     F: Fn() + Sync + Send + 'static,
   {
@@ -17,14 +19,14 @@ mod driver {
 
 #[cfg(shuttle)]
 mod driver {
-  pub use ::shuttle::sync::Arc;
-  pub use ::shuttle::thread;
-  pub use ::shuttle::thread::JoinHandle;
+  pub(crate) use ::shuttle::sync::Arc;
+  pub(crate) use ::shuttle::thread;
+  pub(crate) use ::shuttle::thread::JoinHandle;
 
   const ITERATIONS: usize = 100_000;
 
   #[inline]
-  pub fn check<F>(f: F)
+  pub(crate) fn check<F>(f: F)
   where
     F: Fn() + Sync + Send + 'static,
   {

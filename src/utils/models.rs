@@ -1,4 +1,9 @@
 #![allow(unused_imports, reason = "conditional")]
+#![allow(
+  clippy::std_instead_of_alloc,
+  clippy::std_instead_of_core,
+  reason = "the `std` facade re-exports `alloc` items when `std` is enabled"
+)]
 
 #[cfg(all(loom, shuttle))]
 compile_error!("expected one of `--cfg loom` or `--cfg shuttle`.");

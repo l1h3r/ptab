@@ -27,6 +27,9 @@ where
 /// [`sdd`]: https://crates.io/crates/sdd
 pub enum Sdd {}
 
+// SAFETY: `evict` drops the swapped-out `sdd::Owned`, which hands the entry to
+// `sdd`'s collector. `sdd` runs its destructor once no guard can still observe
+// it, as the collector advances, so evicted entries are not permanently leaked.
 unsafe impl Collector for Sdd {}
 
 impl CollectorWeak for Sdd {
@@ -215,6 +218,7 @@ mod tests {
 
     // SAFETY: the slot is the only owner of the entry, cleared once.
     assert!(unsafe { slot.clear() });
+    // SAFETY: the first `clear` left the slot empty, so this drops nothing.
     assert!(!unsafe { slot.clear() });
   }
 

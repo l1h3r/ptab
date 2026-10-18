@@ -6,7 +6,12 @@ use core::ptr::NonNull;
 use core::sync::atomic::AtomicPtr;
 use core::sync::atomic::Ordering;
 
+#[allow(
+  redundant_imports,
+  reason = "`Box` is only in the prelude with `std`; the `alloc` build needs the import"
+)]
 use crate::alloc::Box;
+
 use crate::reclaim::Atomic;
 use crate::reclaim::CollectorWeak;
 use crate::reclaim::Shared;
