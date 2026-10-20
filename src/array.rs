@@ -143,7 +143,10 @@ where
     // - The pointer is properly aligned.
     let slot: NonNull<T> = unsafe { self.as_non_null().add(index) };
 
-    // SAFETY: `slot` is in bounds and valid for reads, as argued above.
+    // SAFETY:
+    // - `slot` is in bounds and valid for reads, as argued above.
+    // - The element is initialized. `Array::new` writes every slot through its
+    //   init closure before `assume_init`.
     unsafe { slot.as_ref() }
   }
 }
