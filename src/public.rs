@@ -242,6 +242,9 @@ where
   /// Only the slot bits of `index` are used, so an index kept after its entry
   /// was removed removes the entry that now occupies that slot.
   ///
+  /// Requires `T: Send`: the collector may drop the removed entry on whichever
+  /// thread later reclaims it.
+  ///
   /// # Examples
   ///
   /// ```
@@ -261,6 +264,7 @@ where
   #[inline]
   pub fn remove(&self, index: Detached) -> bool
   where
+    T: Send,                 // The collector may drop the entry on another thread
     P::Collector: Collector, // Removed entries must eventually be reclaimed
   {
     self.inner.remove(index)
@@ -518,6 +522,31 @@ mod send_sync {
   /// assert_send_sync::<PTab<Mutex<u8>>>();
   /// ```
   const SEND_SYNC: () = ();
+
+  /// `remove` needs `T: Send`, because the collector may drop the entry on
+  /// another thread. Needs `sdd`: `Leak` has no `Collector`, so without it the
+  /// twin would not compile either.
+  ///
+  /// ```compile_fail,E0277
+  /// use std::sync::{Mutex, MutexGuard};
+  /// use ptab::PTab;
+  ///
+  /// static M: Mutex<u8> = Mutex::new(0);
+  ///
+  /// let table: PTab<MutexGuard<'static, u8>> = PTab::new();
+  /// let idx = table.insert(M.lock().unwrap()).unwrap();
+  /// table.remove(idx);
+  /// ```
+  ///
+  /// ```
+  /// use ptab::PTab;
+  ///
+  /// let table: PTab<u8> = PTab::new();
+  /// let idx = table.insert(0).unwrap();
+  /// table.remove(idx);
+  /// ```
+  #[cfg(feature = "sdd")]
+  const REMOVE_NEEDS_SEND: () = ();
 }
 
 #[cfg(test)]

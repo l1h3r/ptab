@@ -129,7 +129,10 @@ where
   }
 
   #[inline]
-  pub(crate) fn remove(&self, key: Detached) -> bool {
+  pub(crate) fn remove(&self, key: Detached) -> bool
+  where
+    T: Send, // The collector may drop the entry on another thread
+  {
     let index: Concrete<P> = Concrete::from_detached(key);
     let entry: &Atomic<T, P> = self.readonly.data.get(index);
 
@@ -335,8 +338,8 @@ where
 // - `Sync` covers shared `&T` handed out by `with` and `read`: several threads may
 //   hold references to one entry at once, which needs `T: Sync`.
 // - `Send` covers values moved in by `insert` and `write` on one thread and dropped
-//   by `remove` or `Drop` on another, possibly later once reclaimed, which needs
-//   `T: Send`.
+//   by `Drop` on another, which needs `T: Send`. `remove` carries its own `T: Send`
+//   bound, since the collector may drop the entry on any thread.
 // - Both bounds are therefore required. `P` needs no bound, as for `Send`.
 unsafe impl<T, P> Sync for Table<T, P>
 where
