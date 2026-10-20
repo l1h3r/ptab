@@ -106,7 +106,7 @@ jobs:
       - run: cargo miri setup
       - run: cargo miri test
         env:
-          MIRIFLAGS: -Zmiri-strict-provenance
+          MIRIFLAGS: -Zmiri-strict-provenance -Zmiri-many-seeds=0..32
           RUSTFLAGS: --cfg ptab_miri
 
   fmt:
