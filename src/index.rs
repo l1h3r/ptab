@@ -2,6 +2,7 @@ use core::fmt::Debug;
 use core::fmt::Display;
 use core::fmt::Formatter;
 use core::fmt::Result;
+use core::marker::PhantomData;
 
 use crate::params::Params;
 use crate::params::ParamsExt as _;
@@ -238,6 +239,38 @@ where
 }
 
 // -----------------------------------------------------------------------------
+// Index Assertions
+// -----------------------------------------------------------------------------
+
+/// Post-monomorphization checks on the index masks of `P`.
+struct AssertIndexMasks<P>(PhantomData<fn(P)>)
+where
+  P: ?Sized;
+
+impl<P> AssertIndexMasks<P>
+where
+  P: Params + ?Sized,
+{
+  /// ID_MASK_COVERS_LENGTH: the block and slot masks together address exactly
+  /// `0..LENGTH`.
+  const COVERS: () = assert!(
+    Self::covers(P::ID_MASK_BLOCK, P::ID_MASK_INDEX, P::LENGTH.as_usize()),
+    "invalid params: index masks must address exactly `0..LENGTH`",
+  );
+
+  /// Returns `true` if a block mask and a slot mask address exactly `length` slots.
+  const fn covers(mask_block: usize, mask_index: usize, length: usize) -> bool {
+    match (mask_block.checked_add(1), mask_index.checked_add(1)) {
+      (Some(blocks), Some(slots)) => match blocks.checked_mul(slots) {
+        Some(total) => total == length,
+        None => false,
+      },
+      _ => false,
+    }
+  }
+}
+
+// -----------------------------------------------------------------------------
 // Index Mapping
 // -----------------------------------------------------------------------------
 
@@ -268,6 +301,7 @@ const fn abstract_to_concrete<P>(abstract_idx: Abstract<P>) -> Concrete<P>
 where
   P: Params + ?Sized,
 {
+  let () = AssertIndexMasks::<P>::COVERS;
   let mut value: usize = 0;
   value += (abstract_idx.get() & P::ID_MASK_BLOCK) << P::ID_SHIFT_BLOCK;
   value += (abstract_idx.get() >> P::ID_SHIFT_INDEX) & P::ID_MASK_INDEX;
@@ -297,9 +331,11 @@ mod tests {
   use std::collections::HashSet;
 
   use crate::index::Abstract;
+  use crate::index::AssertIndexMasks;
   use crate::index::Concrete;
   use crate::index::Detached;
   use crate::params::CACHE_LINE_SLOTS;
+  use crate::params::DefaultParams;
   use crate::params::Params as _;
   use crate::params::ParamsExt as _;
   use crate::utils::each_capacity;
@@ -473,5 +509,17 @@ mod tests {
         }
       }
     });
+  }
+
+  #[test]
+  fn covers_rejects_masks_past_length() {
+    assert!(!AssertIndexMasks::<DefaultParams>::covers(0, 31, 16));
+    assert!(AssertIndexMasks::<DefaultParams>::covers(0, 15, 16));
+    assert!(AssertIndexMasks::<DefaultParams>::covers(1, 7, 16));
+    assert!(!AssertIndexMasks::<DefaultParams>::covers(
+      usize::MAX,
+      0,
+      16
+    ));
   }
 }

@@ -96,8 +96,12 @@ pub trait ParamsExt: Params + Sealed {
   const ID_MASK_ENTRY: usize = 1_usize.strict_shl(Self::ID_MASK_BITS).strict_sub(1);
   /// The mask selecting the block bits of an index.
   const ID_MASK_BLOCK: usize = Self::BLOCKS.get().strict_sub(1);
-  /// The mask selecting the slot bits within a block.
-  const ID_MASK_INDEX: usize = CACHE_LINE_SLOTS.strict_sub(1);
+  /// The mask selecting the slot bits within a block. It is `CACHE_LINE_SLOTS - 1`
+  /// unless the table is smaller than one cache line.
+  const ID_MASK_INDEX: usize = Self::LENGTH
+    .as_usize()
+    .strict_shr(Self::ID_SHIFT_INDEX)
+    .strict_sub(1);
   /// The shift that places the block bits of an index.
   const ID_SHIFT_BLOCK: u32 = Self::ID_MASK_INDEX.trailing_ones();
   /// The shift that places the slot bits of an index.
@@ -655,7 +659,11 @@ mod tests {
       let expected: usize = P::LENGTH.as_usize();
       let received: usize = P::BLOCKS.get() * CACHE_LINE_SLOTS;
 
-      assert_eq!(expected, received);
+      assert!(received >= expected);
+
+      if expected >= CACHE_LINE_SLOTS {
+        assert_eq!(expected, received);
+      }
     });
   }
 
@@ -707,6 +715,17 @@ mod tests {
   }
 
   #[test]
+  fn id_mask_index_below_length() {
+    each_capacity!({
+      assert!(P::ID_MASK_INDEX < P::LENGTH.as_usize());
+      assert_eq!(
+        P::ID_MASK_INDEX + 1,
+        P::LENGTH.as_usize().min(CACHE_LINE_SLOTS),
+      );
+    });
+  }
+
+  #[test]
   fn id_shift_block_composition() {
     each_capacity!({
       assert_eq!(P::ID_SHIFT_BLOCK, P::ID_MASK_INDEX.count_ones());
@@ -718,5 +737,44 @@ mod tests {
     each_capacity!({
       assert_eq!(P::ID_SHIFT_INDEX, P::ID_MASK_BLOCK.count_ones());
     });
+  }
+
+  /// Maps `abstract_idx` as `abstract_to_concrete` does, for a table of
+  /// `length` slots on a target with `slots` slots per cache line.
+  fn map_for(length: usize, slots: usize, abstract_idx: usize) -> usize {
+    let mask_block: usize = (length / slots).max(1) - 1;
+    let shift_index: u32 = mask_block.trailing_ones();
+    let mask_index: usize = length.strict_shr(shift_index).strict_sub(1);
+    let shift_block: u32 = mask_index.trailing_ones();
+
+    ((abstract_idx & mask_block) << shift_block) + ((abstract_idx >> shift_index) & mask_index)
+  }
+
+  #[test]
+  fn id_mask_index_maps_into_length() {
+    for slots in [8, 16, 32, 64] {
+      for bits in 4..=12 {
+        let length: usize = 1 << bits;
+        let mut seen: Vec<bool> = vec![false; length];
+
+        for index in 0..length {
+          let concrete: usize = map_for(length, slots, index);
+          assert!(
+            concrete < length,
+            "slots {slots}, length {length}, index {index}"
+          );
+          assert!(
+            !seen[concrete],
+            "slots {slots}, length {length}, index {index}"
+          );
+          seen[concrete] = true;
+
+          for generation in 1..4 {
+            let serial: usize = generation * length + index;
+            assert_eq!(map_for(length, slots, serial), concrete);
+          }
+        }
+      }
+    }
   }
 }
