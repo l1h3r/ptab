@@ -254,25 +254,64 @@ where
 {
   #[inline]
   fn drop(&mut self) {
-    let mut count: u32 = self.len();
+    let count: u32 = self.len();
 
     if count == 0 {
       return;
     }
 
-    for entry in self.readonly.data.as_mut_slice() {
+    // If a destructor panics, the guard's `Drop` finishes the walk, so the
+    // remaining entries are still dropped, as `Vec` does.
+    let mut teardown: Teardown<'_, T, P> = Teardown {
+      entries: self.readonly.data.as_mut_slice().iter_mut(),
+      count,
+    };
+
+    teardown.clear_all();
+  }
+}
+
+/// Drops the live entries of a [`Table`] being dropped.
+///
+/// Its `Drop` runs `clear_all` again, so a panicking entry destructor does not
+/// leak the entries after it.
+struct Teardown<'a, T, P>
+where
+  P: Params + ?Sized,
+{
+  entries: core::slice::IterMut<'a, Atomic<T, P>>,
+  count: u32,
+}
+
+impl<T, P> Teardown<'_, T, P>
+where
+  P: Params + ?Sized,
+{
+  fn clear_all(&mut self) {
+    while self.count != 0 {
+      let Some(entry) = self.entries.next() else {
+        break;
+      };
+
       // SAFETY:
       // - `Drop` provides exclusive access via `&mut self`, so no concurrent
       //   access can occur.
-      // - Each slot is dropped at most once.
+      // - Each slot is dropped at most once: the iterator has already advanced
+      //   past an entry whose destructor panicked.
       if unsafe { entry.clear() } {
-        count = count.wrapping_sub(1);
-
-        if count == 0 {
-          break;
-        }
+        self.count = self.count.wrapping_sub(1);
       }
     }
+  }
+}
+
+impl<T, P> Drop for Teardown<'_, T, P>
+where
+  P: Params + ?Sized,
+{
+  #[inline]
+  fn drop(&mut self) {
+    self.clear_all();
   }
 }
 
@@ -1236,6 +1275,48 @@ mod tests {
     assert_eq!(DropMe::load(), table.len());
     drop(table);
     assert_eq!(DropMe::load(), 0);
+  }
+
+  #[test]
+  fn drop_unwind_leak() {
+    struct LeakParams;
+
+    impl crate::params::Params for LeakParams {
+      type Collector = crate::reclaim::collector::Leak;
+
+      const LENGTH: Capacity = Capacity::DEF;
+    }
+
+    static DROPS: [core::sync::atomic::AtomicU32; 4] =
+      [const { core::sync::atomic::AtomicU32::new(0) }; 4];
+
+    struct Unwinding(usize);
+
+    impl Drop for Unwinding {
+      fn drop(&mut self) {
+        DROPS[self.0].fetch_add(1, Ordering::Relaxed);
+
+        assert_ne!(self.0, 2, "destructor panic");
+      }
+    }
+
+    let table: Table<Unwinding, LeakParams> = Table::new();
+
+    for index in 0..4 {
+      assert_ne!(table.insert(Unwinding(index)), None);
+    }
+
+    let result = std::panic::catch_unwind(core::panic::AssertUnwindSafe(move || drop(table)));
+
+    assert!(result.is_err());
+
+    for (index, count) in DROPS.iter().enumerate() {
+      assert_eq!(
+        count.load(Ordering::Relaxed),
+        1,
+        "entry {index} must be dropped exactly once"
+      );
+    }
   }
 
   #[test]
