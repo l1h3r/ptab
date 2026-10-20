@@ -117,8 +117,8 @@ where
   /// Returns a reference to the element at `index`.
   #[inline]
   pub(crate) const fn get(&self, index: Concrete<P>) -> &T {
-    // SAFETY: `Concrete<P>` ensures that the underlying index is strictly less
-    //         than `P::LENGTH`, so it is within bounds.
+    // SAFETY: Every `Concrete<P>` comes from the unsafe `Concrete::new`, whose
+    //         callers guarantee the index is strictly less than `P::LENGTH`.
     unsafe { self.get_unchecked(index.get()) }
   }
 
@@ -226,7 +226,9 @@ mod tests {
       });
 
       for index in 0..P::LENGTH.as_usize() {
-        assert_eq!(array.get(Concrete::<P>::new(index)), &index);
+        // SAFETY: `index` is in `0..P::LENGTH`.
+        let concrete: Concrete<P> = unsafe { Concrete::new(index) };
+        assert_eq!(array.get(concrete), &index);
       }
     });
   }
