@@ -188,6 +188,7 @@ where
     // Table is full; undo the increment.
     let mut current: u32 = prev.wrapping_add(1);
 
+    // Retries the compare-exchange until it undoes the increment.
     while let Err(next) = self.volatile.swap_entries(current, current.wrapping_sub(1)) {
       current = next;
     }
@@ -202,6 +203,9 @@ where
       let concrete_idx: Concrete<P> = Concrete::from_abstract(abstract_idx);
 
       let atomic: &AtomicUsize = self.readonly.slot.get(concrete_idx);
+      // Relaxed: the ring carries only indices. Slot ownership passes through the
+      // data slot: the previous owner's `evict(AcqRel)` in `remove`, then
+      // this owner's `write(Release)` on the same slot.
       let result: usize = atomic.swap(RESERVED, Relaxed);
 
       if result == RESERVED {
@@ -216,6 +220,9 @@ where
   fn release_slot(&self, index: Abstract<P>) {
     let data: usize = self.generate_next_slot(index);
 
+    // Relaxed: publishes only the index. The slot is free after `remove`'s
+    // `evict(AcqRel)`; the next owner's `write(Release)` targets the same data
+    // slot (a swap in sdd, a store in leak).
     while self
       .readonly
       .slot
@@ -364,16 +371,19 @@ where
     self.entries.load(Relaxed)
   }
 
+  // Atomically increments the count, returning the previous value.
   #[inline]
   fn incr_entries(&self) -> u32 {
     self.entries.fetch_add(1, Acquire)
   }
 
+  // Atomically decrements the count, returning the previous value.
   #[inline]
   fn decr_entries(&self) -> u32 {
     self.entries.fetch_sub(1, Release)
   }
 
+  // Compare-exchanges the count from `current` to `updated`.
   #[inline]
   fn swap_entries(&self, current: u32, updated: u32) -> Result<u32, u32> {
     self
@@ -381,11 +391,15 @@ where
       .compare_exchange_weak(current, updated, Release, Relaxed)
   }
 
+  // Relaxed: only hands out a ring position. The slot's ownership is ordered by
+  // `evict(AcqRel)` in `remove` and `write(Release)` on the data slot, not here.
   #[inline]
   fn fetch_next_id(&self) -> Abstract<P> {
     Abstract::new(self.next_id.fetch_add(1, Relaxed) as usize)
   }
 
+  // Relaxed: only hands out a ring position, like `fetch_next_id`. The slot is
+  // already free by `remove`'s `evict(AcqRel)`.
   #[inline]
   fn fetch_free_id(&self) -> Abstract<P> {
     Abstract::new(self.free_id.fetch_add(1, Relaxed) as usize)
