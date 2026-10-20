@@ -48,7 +48,7 @@ pub use crate::table::WeakKeys;
 ///
 /// Sharing the table across threads moves values between them, so `PTab` is
 /// `Sync` only when `T` is both `Send` and `Sync`. A `MutexGuard` is `Sync` but
-/// not `Send`, so it can't be removed from another thread:
+/// not `Send`, so the table can't be shared with another thread:
 ///
 /// ```compile_fail,E0277
 /// use std::sync::Mutex;
@@ -65,7 +65,7 @@ pub use crate::table::WeakKeys;
 ///
 /// thread::scope(|s| {
 ///   s.spawn(|| {
-///     table.remove(idx);
+///     table.exists(idx);
 ///   });
 /// });
 /// ```
@@ -245,6 +245,8 @@ where
   /// # Examples
   ///
   /// ```
+  /// # #[cfg(feature = "sdd")]
+  /// # fn main() {
   /// use ptab::PTab;
   ///
   /// let table: PTab<i32> = PTab::new();
@@ -252,6 +254,9 @@ where
   ///
   /// assert!(table.remove(idx));  // Entry removed
   /// assert!(!table.remove(idx)); // Already gone
+  /// # }
+  /// # #[cfg(not(feature = "sdd"))]
+  /// # fn main() {}
   /// ```
   #[inline]
   pub fn remove(&self, index: Detached) -> bool
@@ -268,6 +273,8 @@ where
   /// # Examples
   ///
   /// ```
+  /// # #[cfg(feature = "sdd")]
+  /// # fn main() {
   /// use ptab::PTab;
   ///
   /// let table: PTab<i32> = PTab::new();
@@ -276,6 +283,9 @@ where
   /// assert!(table.exists(idx));
   /// table.remove(idx);
   /// assert!(!table.exists(idx));
+  /// # }
+  /// # #[cfg(not(feature = "sdd"))]
+  /// # fn main() {}
   /// ```
   #[inline]
   pub fn exists(&self, index: Detached) -> bool {

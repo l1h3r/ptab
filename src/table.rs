@@ -648,15 +648,25 @@ where
   clippy::std_instead_of_alloc,
   reason = "tests run with `std` and the `alloc` crate is not declared"
 )]
+#[cfg_attr(
+  not(feature = "sdd"),
+  allow(
+    clippy::let_unit_value,
+    clippy::unit_arg,
+    reason = "the leaking collector's guard is `()`"
+  )
+)]
 mod tests {
   use core::fmt::Result as FmtResult;
   use core::fmt::Write;
+  #[cfg(feature = "sdd")]
   use core::time::Duration;
   use std::collections::HashSet;
   use std::sync::Arc;
   use std::sync::Barrier;
   use std::thread;
   use std::thread::JoinHandle;
+  #[cfg(feature = "sdd")]
   use std::time::Instant;
 
   use crate::index::Abstract;
@@ -671,7 +681,9 @@ mod tests {
   use crate::sync::atomic::AtomicUsize;
   use crate::sync::atomic::Ordering;
   use crate::table;
+  #[cfg(feature = "sdd")]
   use crate::table::Atomic;
+  #[cfg(feature = "sdd")]
   use crate::table::DataArray;
   use crate::table::Guard;
   use crate::table::Permit;
@@ -769,6 +781,7 @@ mod tests {
   // ---------------------------------------------------------------------------
 
   #[test]
+  #[cfg(feature = "sdd")]
   fn new_data_array() {
     let array: DataArray<u64, DefParams> = ReadOnly::new_data_array();
     let slice: &[Atomic<u64, DefParams>] = array.as_slice();
@@ -1283,6 +1296,7 @@ mod tests {
   }
 
   #[test]
+  #[cfg(feature = "sdd")]
   fn drop_half_full() {
     make_drop!(DropMe);
 
