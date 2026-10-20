@@ -778,3 +778,86 @@ mod tests {
     }
   }
 }
+
+// -----------------------------------------------------------------------------
+// Kani Proofs
+// -----------------------------------------------------------------------------
+
+// Calls `$harness!` once per capacity, from 2^4 to 2^27, so each module's proofs
+// cover every `Capacity` rather than a sample.
+#[cfg(kani)]
+macro_rules! kani_each_capacity {
+  ($harness:ident) => {
+    $harness!(cap04, 4);
+    $harness!(cap05, 5);
+    $harness!(cap06, 6);
+    $harness!(cap07, 7);
+    $harness!(cap08, 8);
+    $harness!(cap09, 9);
+    $harness!(cap10, 10);
+    $harness!(cap11, 11);
+    $harness!(cap12, 12);
+    $harness!(cap13, 13);
+    $harness!(cap14, 14);
+    $harness!(cap15, 15);
+    $harness!(cap16, 16);
+    $harness!(cap17, 17);
+    $harness!(cap18, 18);
+    $harness!(cap19, 19);
+    $harness!(cap20, 20);
+    $harness!(cap21, 21);
+    $harness!(cap22, 22);
+    $harness!(cap23, 23);
+    $harness!(cap24, 24);
+    $harness!(cap25, 25);
+    $harness!(cap26, 26);
+    $harness!(cap27, 27);
+  };
+}
+
+#[cfg(kani)]
+pub(crate) use kani_each_capacity;
+
+#[cfg(kani)]
+mod proofs {
+  use super::*;
+
+  // Checks the derived parameters of `P` against their definitions.
+  fn check_params<P>()
+  where
+    P: Params,
+  {
+    let length: usize = P::LENGTH.as_usize();
+
+    assert!(P::LENGTH.as_nonzero().get() == length);
+    assert!(1_usize << P::LENGTH.log2() == length);
+    assert!(P::ID_MASK_BITS == length.trailing_zeros());
+    assert!(P::ID_MASK_ENTRY == length - 1);
+    assert!(P::ID_MASK_BLOCK + 1 == P::BLOCKS.get());
+    assert!(P::ID_SHIFT_BLOCK == (P::ID_MASK_INDEX + 1).trailing_zeros());
+    assert!(P::ID_SHIFT_INDEX == (P::ID_MASK_BLOCK + 1).trailing_zeros());
+    assert!(P::ID_MASK_BITS == P::ID_SHIFT_BLOCK + P::ID_SHIFT_INDEX);
+    assert!(P::BLOCKS.get() * CACHE_LINE >= length * size_of::<AtomicUsize>());
+  }
+
+  #[kani::proof]
+  fn capacity_new_is_power_of_two_in_range() {
+    let value: usize = kani::any();
+    let capacity: usize = Capacity::new(value).as_usize();
+
+    assert!(capacity.is_power_of_two());
+    assert!(capacity >= Capacity::MIN.as_usize());
+    assert!(capacity <= Capacity::MAX.as_usize());
+  }
+
+  macro_rules! harness {
+    ($name:ident, $bits:literal) => {
+      #[kani::proof]
+      fn $name() {
+        check_params::<ConstParams<{ 1 << $bits }>>();
+      }
+    };
+  }
+
+  kani_each_capacity!(harness);
+}

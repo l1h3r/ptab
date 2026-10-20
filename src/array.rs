@@ -270,3 +270,64 @@ mod tests {
     });
   }
 }
+
+// -----------------------------------------------------------------------------
+// Kani Proofs
+// -----------------------------------------------------------------------------
+
+#[cfg(kani)]
+mod proofs {
+  use core::mem::align_of;
+  use core::mem::size_of;
+
+  use crate::params::CACHE_LINE;
+  use crate::params::ConstParams;
+  use crate::params::Params;
+  use crate::params::ParamsExt as _;
+  use crate::params::kani_each_capacity;
+  use crate::sync::atomic::AtomicUsize;
+
+  // Checks the allocation of `P` holding slots of type `T`, without allocating.
+  fn check_slot<P, T>()
+  where
+    P: Params,
+  {
+    let length: usize = P::LENGTH.as_usize();
+    let slot: usize = size_of::<T>();
+
+    // The layout is sized for `AtomicUsize` slots, so `T` must fill the same space.
+    assert!(slot == size_of::<AtomicUsize>());
+    assert!(CACHE_LINE % align_of::<T>() == 0);
+
+    assert!(P::LAYOUT.size() == P::MEMORY);
+    assert!(P::LAYOUT.align() == CACHE_LINE);
+    assert!(P::MEMORY <= isize::MAX as usize);
+
+    assert!(length.checked_mul(size_of::<AtomicUsize>()).is_some());
+    assert!(P::BLOCKS.get().checked_mul(CACHE_LINE).is_some());
+
+    // The base is aligned to `CACHE_LINE`, so every slot offset is in bounds and
+    // aligned for `T`.
+    let index: usize = kani::any();
+    kani::assume(index < length);
+
+    assert!((index + 1) * slot <= P::MEMORY);
+    assert!((index * slot) % align_of::<T>() == 0);
+  }
+
+  macro_rules! harness {
+    ($name:ident, $bits:literal) => {
+      #[kani::proof]
+      fn $name() {
+        type P = ConstParams<{ 1 << $bits }>;
+
+        check_slot::<P, AtomicUsize>();
+        check_slot::<P, core::sync::atomic::AtomicPtr<u8>>();
+        #[cfg(feature = "sdd")]
+        check_slot::<P, sdd::AtomicOwned<u8>>();
+      }
+    };
+  }
+
+  kani_each_capacity!(harness);
+}

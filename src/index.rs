@@ -549,3 +549,78 @@ mod tests {
     ));
   }
 }
+
+// -----------------------------------------------------------------------------
+// Kani Proofs
+// -----------------------------------------------------------------------------
+
+#[cfg(kani)]
+mod proofs {
+  use super::*;
+  use crate::params::ConstParams;
+  use crate::params::kani_each_capacity;
+
+  // Checks the index mapping of `P`.
+  fn check_mapping<P>()
+  where
+    P: Params,
+  {
+    let length: usize = P::LENGTH.as_usize();
+
+    assert!(AssertIndexMasks::<P>::covers(
+      P::ID_MASK_BLOCK,
+      P::ID_MASK_INDEX,
+      length
+    ));
+
+    // Injective on `0..LENGTH`.
+    let a: usize = kani::any();
+    let b: usize = kani::any();
+    kani::assume(a < length);
+    kani::assume(b < length);
+
+    let ca: usize = abstract_to_concrete::<P>(Abstract::new(a)).get();
+    let cb: usize = abstract_to_concrete::<P>(Abstract::new(b)).get();
+
+    if ca == cb {
+      assert!(a == b);
+    }
+
+    // Surjective on `0..LENGTH`: `c` has a preimage in range, and that preimage
+    // maps back to `c`.
+    let c: usize = kani::any();
+    kani::assume(c < length);
+
+    let preimage: usize = (c >> P::ID_SHIFT_BLOCK) | ((c & P::ID_MASK_INDEX) << P::ID_SHIFT_INDEX);
+    assert!(preimage < length);
+    assert!(abstract_to_concrete::<P>(Abstract::new(preimage)).get() == c);
+
+    // Round trip for every sequential index.
+    let d: usize = kani::any();
+    let detached: Detached = abstract_to_detached::<P>(Abstract::new(d));
+    assert!(detached_to_abstract::<P>(detached).get() == d);
+
+    // Every detached index, whatever its bits, lands in bounds and agrees with
+    // the sequential index it decodes to.
+    let bits: usize = kani::any();
+    let index: Detached = Detached::from_bits(bits);
+    let concrete: usize = detached_to_concrete::<P>(index).get();
+
+    assert!(concrete < length);
+    assert!(abstract_to_concrete::<P>(detached_to_abstract::<P>(index)).get() == concrete);
+
+    let (number, _serial) = index.decompose::<P>();
+    assert!((number as usize) < length);
+  }
+
+  macro_rules! harness {
+    ($name:ident, $bits:literal) => {
+      #[kani::proof]
+      fn $name() {
+        check_mapping::<ConstParams<{ 1 << $bits }>>();
+      }
+    };
+  }
+
+  kani_each_capacity!(harness);
+}
