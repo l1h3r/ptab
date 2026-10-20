@@ -95,18 +95,28 @@ jobs:
       - run: cargo docs-rs
 
   miri:
-    name: Miri
+    name: Miri ${{ matrix.target || 'host' }}
     needs: pre_ci
     if: needs.pre_ci.outputs.continue
     runs-on: ubuntu-latest
     timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: ""
+            seeds: 0..32
+          - target: s390x-unknown-linux-gnu
+            seeds: 0..4
+          - target: i686-unknown-linux-gnu
+            seeds: 0..4
     steps:
       - uses: actions/checkout@v6
       - uses: dtolnay/rust-toolchain@miri
-      - run: cargo miri setup
-      - run: cargo miri test
+      - run: cargo miri setup ${{ matrix.target && format('--target {0}', matrix.target) || '' }}
+      - run: cargo miri test ${{ matrix.target && format('--target {0}', matrix.target) || '' }}
         env:
-          MIRIFLAGS: -Zmiri-strict-provenance -Zmiri-many-seeds=0..32
+          MIRIFLAGS: -Zmiri-strict-provenance -Zmiri-many-seeds=${{ matrix.seeds }}
           RUSTFLAGS: --cfg ptab_miri
 
   fmt:
