@@ -450,19 +450,19 @@ impl CapacityEnum {
   #[cfg(ptab_miri)]
   const MAX: Self = Self::Capacity1Shl10;
 
-  #[cfg(all(not(ptab_miri), test, not(feature = "slow")))]
+  #[cfg(all(not(ptab_miri), test))]
   const MAX: Self = Self::Capacity1Shl16;
 
-  #[cfg(not(any(ptab_miri, all(test, not(feature = "slow")))))]
+  #[cfg(not(any(ptab_miri, test)))]
   const MAX: Self = Self::Capacity1Shl27;
 
   #[cfg(ptab_miri)]
   const DEF: Self = Self::Capacity1Shl5;
 
-  #[cfg(all(not(ptab_miri), test, not(feature = "slow")))]
+  #[cfg(all(not(ptab_miri), test))]
   const DEF: Self = Self::Capacity1Shl10;
 
-  #[cfg(not(any(ptab_miri, all(test, not(feature = "slow")))))]
+  #[cfg(not(any(ptab_miri, test)))]
   const DEF: Self = Self::Capacity1Shl20;
 }
 

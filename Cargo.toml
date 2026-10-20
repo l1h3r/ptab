@@ -51,12 +51,6 @@ std = []
 # Enable support for compiling with Rust's allocation library.
 alloc = []
 
-# Enable tests that are generally quite slow.
-#
-# This configuration option is outside of the normal semver guarantees: minor
-# versions of ptab may make breaking changes to it at any time.
-slow = []
-
 # Enable the use of loom for concurrency testing.
 #
 # This configuration option is outside of the normal semver guarantees: minor

@@ -1284,7 +1284,6 @@ mod tests {
 
   // Scenario: A full `Capacity::MAX` table has one remove and one reinsert.
   // Expected: `weak_keys` yields exactly `len` keys.
-  #[cfg(feature = "slow")]
   #[test]
   fn weak_keys_full_max() {
     let table: Table<(), MaxParams> = Table::new();

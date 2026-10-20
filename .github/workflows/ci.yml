@@ -31,7 +31,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@master
         with:
           toolchain: ${{matrix.rust}}
-      - run: cargo test --features slow
+      - run: cargo test
 
   loom:
     name: Loom ${{matrix.rust}}
