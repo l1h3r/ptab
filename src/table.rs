@@ -695,6 +695,8 @@ mod tests {
   use crate::params::Params as _;
   use crate::params::ParamsExt as _;
   use crate::reclaim::Atomic as _;
+  #[cfg(feature = "sdd")]
+  use crate::reclaim::Shared as _;
   use crate::sync::atomic::AtomicUsize;
   use crate::sync::atomic::Ordering;
   use crate::table;
