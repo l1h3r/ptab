@@ -105,7 +105,7 @@ redundant_lifetimes = "deny"
 single_use_lifetimes = "deny"
 trivial_casts = "deny"
 trivial_numeric_casts = "deny"
-unexpected_cfgs = { level = "warn", check-cfg = ["cfg(coverage,coverage_nightly,loom,shuttle)"] }
+unexpected_cfgs = { level = "warn", check-cfg = ["cfg(coverage,coverage_nightly,loom,shuttle,ptab_miri)"] }
 unit_bindings = "deny"
 unreachable_pub = "deny"
 unused_import_braces = "deny"

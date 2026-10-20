@@ -443,24 +443,33 @@ enum CapacityEnum {
 impl CapacityEnum {
   const MIN: Self = Self::Capacity1Shl4;
 
-  #[cfg(miri)]
+  #[cfg(ptab_miri)]
   const MAX: Self = Self::Capacity1Shl10;
 
-  #[cfg(all(not(miri), test, not(feature = "slow")))]
+  #[cfg(all(not(ptab_miri), test, not(feature = "slow")))]
   const MAX: Self = Self::Capacity1Shl16;
 
-  #[cfg(not(any(miri, all(test, not(feature = "slow")))))]
+  #[cfg(not(any(ptab_miri, all(test, not(feature = "slow")))))]
   const MAX: Self = Self::Capacity1Shl27;
 
-  #[cfg(miri)]
+  #[cfg(ptab_miri)]
   const DEF: Self = Self::Capacity1Shl5;
 
-  #[cfg(all(not(miri), test, not(feature = "slow")))]
+  #[cfg(all(not(ptab_miri), test, not(feature = "slow")))]
   const DEF: Self = Self::Capacity1Shl10;
 
-  #[cfg(not(any(miri, all(test, not(feature = "slow")))))]
+  #[cfg(not(any(ptab_miri, all(test, not(feature = "slow")))))]
   const DEF: Self = Self::Capacity1Shl20;
 }
+
+// Under Miri, ptab's own tests and doctests use the reduced sizes only with `--cfg ptab_miri`.
+// Without it they would build full-size tables. Cargo sets `CARGO_PRIMARY_PACKAGE` only for
+// packages selected by the user, so it is set when ptab's own tests and doctests build, and never
+// when ptab is a downstream dependency.
+#[cfg(all(miri, not(ptab_miri)))]
+const _: () = if option_env!("CARGO_PRIMARY_PACKAGE").is_some() {
+  panic!("under Miri, ptab's own tests need `RUSTFLAGS=\"--cfg ptab_miri\"`")
+};
 
 // -----------------------------------------------------------------------------
 // Misc. Utilities
