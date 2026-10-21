@@ -1165,6 +1165,10 @@ mod tests {
   }
 
   #[test]
+  #[cfg_attr(
+    all(miri, not(feature = "sdd")),
+    ignore = "Leak never frees evicted entries, so Miri's leak check fails"
+  )]
   fn remove() {
     let table: Table<usize, DefParams> = Table::new();
     let index: Detached = table.insert(123).unwrap();
@@ -1179,6 +1183,10 @@ mod tests {
   }
 
   #[test]
+  #[cfg_attr(
+    all(miri, not(feature = "sdd")),
+    ignore = "Leak never frees evicted entries, so Miri's leak check fails"
+  )]
   fn remove_nonexistent() {
     let table: Table<usize, DefParams> = Table::new();
     let index: Detached = table.insert(123).unwrap();
@@ -1188,6 +1196,10 @@ mod tests {
   }
 
   #[test]
+  #[cfg_attr(
+    all(miri, not(feature = "sdd")),
+    ignore = "Leak never frees evicted entries, so Miri's leak check fails"
+  )]
   fn remove_recycling() {
     let table: Table<usize, DefParams> = Table::new();
     let guard: Guard<DefParams> = DefParams::guard();
@@ -1470,6 +1482,10 @@ mod tests {
   // Expected: `len`, `weak_keys` and `Debug` agree on the live entries, and the
   // key `insert` returned reads back its value.
   #[test]
+  #[cfg_attr(
+    all(miri, not(feature = "sdd")),
+    ignore = "Leak never frees evicted entries, so Miri's leak check fails"
+  )]
   fn slot_reuse_len_weak_keys_debug() {
     let table: Table<usize, MinParams> = Table::new();
     let guard: Guard<MinParams> = MinParams::guard();
@@ -1516,6 +1532,10 @@ mod tests {
   // Scenario: A full table has one entry removed and nothing inserted after.
   // Expected: `len`, `weak_keys` and `Debug` all report one fewer entry.
   #[test]
+  #[cfg_attr(
+    all(miri, not(feature = "sdd")),
+    ignore = "Leak never frees evicted entries, so Miri's leak check fails"
+  )]
   fn slot_reuse_partial() {
     let table: Table<usize, MinParams> = Table::new();
     let cap: usize = table.cap();
@@ -1540,6 +1560,10 @@ mod tests {
   // Scenario: A table is filled, emptied and filled again.
   // Expected: Once emptied, `Debug` is `{}` and `weak_keys` yields nothing.
   #[test]
+  #[cfg_attr(
+    all(miri, not(feature = "sdd")),
+    ignore = "Leak never frees evicted entries, so Miri's leak check fails"
+  )]
   fn slot_reuse_remove_all() {
     let table: Table<usize, MinParams> = Table::new();
     let cap: usize = table.cap();
@@ -1564,6 +1588,10 @@ mod tests {
   // Scenario: The table has a single block due to min capacity.
   // Expected: Entry operations succeed.
   #[test]
+  #[cfg_attr(
+    all(miri, not(feature = "sdd")),
+    ignore = "Leak never frees evicted entries, so Miri's leak check fails"
+  )]
   fn min_capacity_ops() {
     let table: Table<usize, MinParams> = Table::new();
     let guard: Guard<MinParams> = MinParams::guard();
