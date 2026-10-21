@@ -147,7 +147,7 @@ where
   #[inline]
   pub(crate) fn with<F, R>(&self, key: Detached, guard: &Guard<P>, f: F) -> Option<R>
   where
-    F: Fn(&T) -> R,
+    F: FnOnce(&T) -> R,
   {
     self.find(key, guard).as_ref().map(f)
   }

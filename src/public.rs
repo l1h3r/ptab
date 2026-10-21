@@ -314,10 +314,26 @@ where
   /// let len = table.with(idx, |s| s.len());
   /// assert_eq!(len, Some(5));
   /// ```
+  ///
+  /// The closure is called at most once, so it may consume captured values:
+  ///
+  /// ```
+  /// use ptab::PTab;
+  ///
+  /// let table: PTab<String> = PTab::new();
+  /// let idx = table.insert("hello".to_string()).unwrap();
+  ///
+  /// let owned = String::from("x");
+  /// let n = table.with(idx, move |s| {
+  ///   let o = owned;
+  ///   o.len() + s.len()
+  /// });
+  /// assert_eq!(n, Some(6));
+  /// ```
   #[inline]
   pub fn with<F, R>(&self, index: Detached, f: F) -> Option<R>
   where
-    F: Fn(&T) -> R,
+    F: FnOnce(&T) -> R,
   {
     self.inner.with(index, &P::guard(), f)
   }
