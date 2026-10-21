@@ -33,7 +33,8 @@ pub unsafe trait Collector: CollectorWeak {}
 /// entries removed via [`Atomic::evict()`] are eventually reclaimed.
 ///
 /// Implementations are permitted to permanently leak evicted entries. If
-/// eventual reclamation is required, see [`Collector`].
+/// eventual reclamation is required, see [`Collector`]. [`Leak`] is the
+/// built-in example; [`PTab`] cannot evict through it.
 ///
 /// # Overview
 ///
@@ -155,6 +156,8 @@ pub unsafe trait Collector: CollectorWeak {}
 /// [`Collector`]: crate::reclaim::Collector
 /// [`flush()`]: crate::reclaim::CollectorWeak::flush
 /// [`Guard`]: crate::reclaim::CollectorWeak::Guard
+/// [`Leak`]: crate::reclaim::collector::Leak
+/// [`PTab`]: crate::PTab
 /// [`Shared`]: crate::reclaim::Atomic::Shared
 pub trait CollectorWeak {
   /// A guard that keeps the current thread pinned.
@@ -283,7 +286,11 @@ pub unsafe trait Atomic<T> {
   /// - For collectors implementing [`Collector`], a successfully evicted value
   ///   is guaranteed to be eventually reclaimed.
   /// - For [`CollectorWeak`] implementations, the value may be permanently
-  ///   leaked.
+  ///   leaked. [`Leak`] is the built-in example; [`PTab`] cannot evict through
+  ///   it.
+  ///
+  /// [`Leak`]: crate::reclaim::collector::Leak
+  /// [`PTab`]: crate::PTab
   ///
   /// # Concurrency
   ///

@@ -15,7 +15,13 @@ use crate::reclaim::Atomic;
 use crate::reclaim::CollectorWeak;
 use crate::reclaim::Shared;
 
-/// A reclamation strategy that leaks evicted entries.
+/// A reclamation strategy that never evicts through [`PTab`].
+///
+/// It implements only [`CollectorWeak`], so [`PTab::remove()`] is not available
+/// with it. Entries are freed when the table drops.
+///
+/// [`PTab`]: crate::PTab
+/// [`PTab::remove()`]: crate::public::PTab::remove
 pub enum Leak {}
 
 impl CollectorWeak for Leak {
@@ -101,7 +107,8 @@ unsafe impl<T> Atomic<T> for Slot<T> {
 
   #[inline]
   fn evict(&self, order: Ordering) -> bool {
-    // True to the name, we leak the entry `Box<T>` here
+    // The swapped-out `Box<T>` is leaked here; `clear` frees only the entry
+    // still in the slot.
     !self.0.swap(ptr::null_mut(), order).is_null()
   }
 

@@ -38,6 +38,31 @@ assert_eq!(table.read(index_a).unwrap(), "hello");
 assert_eq!(table.read(index_b).unwrap(), "world");
 ```
 
+## Features
+
+- `sdd` (default): the `Sdd` collector. Turns on `std`.
+- `std`: builds against the standard library.
+- `alloc`: builds without `std`. Without `sdd`, the default collector is `Leak`.
+
+To build without default features:
+
+```sh
+cargo build --no-default-features --features alloc
+```
+
+The alloc-only build inserts and reads. Its default collector is [`Leak`], which has no `remove` and frees entries when the table drops.
+
+## Collectors
+
+| | [`Sdd`] | [`Leak`] |
+|-|-|-|
+| Feature | `sdd` (default) | Without `sdd` |
+| Needs `std` | Yes | No |
+| Frees entries | Eventually, via epochs | On table drop |
+| Supports `remove` | Yes | No |
+| Guard type | `sdd::Guard` | `()` |
+| Read cost | Epoch pin | Plain atomic load |
+
 ## Design
 
 See [`IMPLEMENTATION.md`] for design notes.
@@ -59,6 +84,8 @@ See [`IMPLEMENTATION.md`] for design notes.
 [//]: # (links)
 
 [`IMPLEMENTATION.md`]: IMPLEMENTATION.md
+[`Leak`]: https://docs.rs/ptab/latest/ptab/memory/collector/enum.Leak.html
+[`Sdd`]: https://docs.rs/ptab/latest/ptab/memory/collector/enum.Sdd.html
 
 [//]: # (badges)
 

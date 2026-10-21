@@ -102,11 +102,25 @@
 //!
 //! Removed entries are reclaimed by the collector that `Params::Collector`
 //! selects, deferred while any reader may still hold a reference. With the
-//! `sdd` feature (the default) `DefaultParams` uses a collector that
-//! eventually reclaims every removed entry. Without it the default is a leaking
-//! collector, which never reclaims and does not support `remove`.
+//! `sdd` feature (the default), `DefaultParams` uses `Sdd`, which eventually
+//! reclaims every removed entry. Without it, the default is [`Leak`]. It has no
+//! `remove`, and it frees entries only when the table drops.
+//!
+//! [`PTab::remove()`] is available for any `Params` whose collector implements
+//! [`Collector`]. `Sdd` is the built-in one and needs `std`. The reclamation
+//! traits are public, so a custom collector can implement them.
 //!
 //! See [`memory`] for reclamation trait details and custom implementations.
+//!
+//! # Features
+//!
+//! - `sdd` (default) selects `Sdd` and turns on `std`.
+//! - `std` builds against the standard library.
+//! - `alloc` builds without `std`.
+//!
+//! The `alloc`-only build (`--no-default-features --features alloc`) inserts
+//! and reads. Its default collector is [`Leak`], so it has no `remove`. Supply
+//! `Params` whose collector implements [`Collector`] to get `remove`.
 //!
 //! # Memory Layout
 //!
@@ -126,10 +140,13 @@
 //! [`Capacity::DEF`]: crate::params::Capacity::DEF
 //! [`Capacity::MAX`]: crate::params::Capacity::MAX
 //! [`Capacity::MIN`]: crate::params::Capacity::MIN
+//! [`Collector`]: crate::memory::Collector
 //! [`ConstParams`]: crate::params::ConstParams
 //! [`DefaultParams`]: crate::params::DefaultParams
+//! [`Leak`]: crate::memory::collector::Leak
 //! [`Params`]: crate::params::Params
 //! [`PTab::insert()`]: crate::public::PTab::insert
+//! [`PTab::remove()`]: crate::public::PTab::remove
 //! [`memory`]: crate::memory
 //! [`implementation`]: crate::implementation
 

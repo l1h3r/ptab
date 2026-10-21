@@ -180,6 +180,10 @@ where
 ///
 /// Used when a table does not name a [`Params`] type.
 ///
+/// The collector depends on the `sdd` feature. With it, the collector is `Sdd`,
+/// which supports `remove` and needs `std`. Without it, the collector is
+/// [`collector::Leak`], which has no `remove`.
+///
 /// # Examples
 ///
 /// ```
