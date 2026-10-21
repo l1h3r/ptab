@@ -51,6 +51,11 @@ pub struct Slot<T>(AtomicPtr<T>);
 //   `usize`.
 // - `evict` swaps the pointer out and leaks the entry, so no reader can see it
 //   freed.
+// - `AtomicPtr` operations are thread-safe, so the `&self` methods are sound to
+//   call from several threads.
+// - `AtomicPtr<T>` is `Send` for every `T`, but `Slot` also owns the `T` that
+//   `clear` frees. That `T` moves and drops as a `Box<T>` does, so `Slot` is
+//   sound to move to and drop on another thread when `T: Send`.
 unsafe impl<T> Atomic<T> for Slot<T> {
   type Guard = ();
 

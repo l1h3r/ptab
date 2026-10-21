@@ -191,6 +191,10 @@ pub trait CollectorWeak {
 ///
 /// # Safety
 ///
+/// The table derives its `Send` and `Sync` impls from `T` alone, not from the
+/// implementing type. It calls [`evict`] only when `T: Send`, so the collector
+/// may drop an evicted value on any thread.
+///
 /// The table relies on the following. An implementation must uphold all of it.
 ///
 /// - [`read`] returns either null or a pointer to a valid `T` that stays live
@@ -198,6 +202,10 @@ pub trait CollectorWeak {
 /// - `Self` has the size and alignment of `usize`.
 /// - [`evict`] hands the evicted entry to the collector, which does not drop it
 ///   while a guard that could have read it is live.
+/// - When `T: Send + Sync`, every `&self` method is sound to call from several
+///   threads at once, whatever auto traits `Self` has.
+/// - When `T: Send`, a value of `Self` is sound to move to and drop on another
+///   thread, whatever auto traits `Self` has. `Self` adds no thread affinity.
 ///
 /// A safe `impl` is rejected, because the trait is `unsafe`:
 ///

@@ -325,6 +325,9 @@ where
 // SAFETY:
 // - `Table` may transfer ownership of entries across threads.
 // - This is only sound if `T: Send`.
+// - The collector's `Atomic` contract (`# Safety` in `reclaim::traits`) makes
+//   the bound on `T` alone sufficient: its `Atomic` impl is sound to move and
+//   drop on another thread when `T: Send`, whatever auto traits it has.
 // - `P` is only a type-level configuration: `Table` never stores a value of type `P`,
 //   only `PhantomData` markers, so it needs no bound.
 unsafe impl<T, P> Send for Table<T, P>
@@ -341,6 +344,9 @@ where
 //   by `Drop` on another, which needs `T: Send`. `remove` carries its own `T: Send`
 //   bound, since the collector may drop the entry on any thread.
 // - Both bounds are therefore required. `P` needs no bound, as for `Send`.
+// - The collector's `Atomic` contract (`# Safety` in `reclaim::traits`) covers
+//   the `&self` methods for `T: Send + Sync`, so these bounds on `T` alone are
+//   sufficient.
 unsafe impl<T, P> Sync for Table<T, P>
 where
   T: Send + Sync,

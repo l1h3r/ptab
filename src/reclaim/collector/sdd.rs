@@ -72,6 +72,12 @@ pub struct SddAtomic<T>(sdd::AtomicOwned<T>);
 //   alignment of `usize` (const-asserted in `Array::new_uninit`).
 // - `evict` swaps out the `sdd::Owned` and drops it, which hands the entry to
 //   sdd's collector for deferred destruction.
+// - Every `&self` method goes through `sdd::AtomicOwned`, which is `Sync` for
+//   `T: Send + Sync`, so they are sound to call from several threads then.
+// - `sdd::AtomicOwned` is `Send` only for `T: Send + Sync`, so the move
+//   obligation for `T: Send` rests on ownership instead: a move needs `&mut`
+//   access, so no guard borrows the slot. A retired entry is owned by sdd and
+//   dropped on any thread, which needs only `T: Send`.
 unsafe impl<T> Atomic<T> for SddAtomic<T> {
   type Guard = sdd::Guard;
 
