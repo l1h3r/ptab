@@ -13,8 +13,14 @@ mod driver {
   where
     F: Fn() + Sync + Send + 'static,
   {
-    loom::model(f);
+    let mut builder: loom::model::Builder = loom::model::Builder::new();
+
+    // The tracked data slots add branches; loom's default of 1_000 is too low.
+    builder.max_branches = builder.max_branches.max(MAX_BRANCHES);
+    builder.check(f);
   }
+
+  const MAX_BRANCHES: usize = 10_000;
 }
 
 #[cfg(shuttle)]
@@ -43,7 +49,275 @@ use core::cell::RefCell;
 use ptab::Capacity;
 use ptab::Detached;
 
-type PTab = ptab::PTab<usize, ptab::ConstParams<{ Capacity::MIN.as_usize() }>>;
+use ptab::config::Params;
+use ptab::memory::Collector;
+
+use self::collector::ModelCollector;
+
+type PTab<P> = ptab::PTab<usize, P>;
+
+/// A table configuration the models run on.
+trait Model: Params<Collector: Collector> + 'static {}
+
+impl<P> Model for P where P: Params<Collector: Collector> + 'static {}
+
+/// The real reclaimer. Loom and shuttle don't see its atomics, so only the
+/// remove models run on it.
+type SddParams = ptab::ConstParams<{ Capacity::MIN.as_usize() }>;
+
+/// Data slots that loom and shuttle track.
+enum TrackedParams {}
+
+impl Params for TrackedParams {
+  type Collector = ModelCollector;
+
+  const LENGTH: Capacity = Capacity::MIN;
+}
+
+/// The lookups each lookup thread does in `insert_lookup`.
+const LOOKUPS: usize = 10;
+
+// -----------------------------------------------------------------------------
+// Model Collector
+// -----------------------------------------------------------------------------
+
+mod collector {
+  use core::marker::PhantomData;
+  use core::mem::MaybeUninit;
+  use core::ptr;
+  use core::sync::atomic::Ordering;
+
+  use ptab::memory::Atomic;
+  use ptab::memory::Collector;
+  use ptab::memory::CollectorWeak;
+  use ptab::memory::Shared;
+
+  #[cfg(loom)]
+  type Inner<T> = ::loom::sync::atomic::AtomicPtr<T>;
+
+  // Shuttle's `AtomicPtr` is wider than a pointer; the table's layout needs
+  // one pointer per slot, so box it.
+  #[cfg(shuttle)]
+  type Inner<T> = Box<::shuttle::sync::atomic::AtomicPtr<T>>;
+
+  /// A collector whose data slots are model atomics. It leaks evicted
+  /// entries.
+  pub(crate) enum ModelCollector {}
+
+  /// The guard of [`ModelCollector`]; it pins nothing.
+  pub(crate) struct ModelGuard;
+
+  impl CollectorWeak for ModelCollector {
+    type Guard = ModelGuard;
+    type Atomic<T> = ModelAtomic<T>;
+
+    fn guard() -> Self::Guard {
+      ModelGuard
+    }
+
+    fn flush() {
+      // nothing is retired for reclamation
+    }
+  }
+
+  // SAFETY:
+  // - This breaks the eventual-reclamation clause of `Collector`: `retire`
+  //   leaks every evicted entry. It is allowed in these tests only, for now.
+  // - Memory safety doesn't depend on that clause: nothing is freed early, so
+  //   a pointer read under a guard stays valid.
+  unsafe impl Collector for ModelCollector {}
+
+  /// Hands an evicted entry to the collector. It leaks the entry.
+  fn retire<T>(pointer: *mut T) {
+    let _leaked: *mut T = pointer;
+  }
+
+  /// A data slot backed by a loom or shuttle `AtomicPtr`.
+  ///
+  /// Every method passes the caller's ordering through unchanged, so the
+  /// models see the orderings the table really uses.
+  #[repr(transparent)]
+  pub(crate) struct ModelAtomic<T> {
+    inner: Inner<T>,
+  }
+
+  impl<T> ModelAtomic<T> {
+    #[cfg(loom)]
+    fn take(&mut self) -> *mut T {
+      self.inner.with_mut(|pointer| *pointer)
+    }
+
+    #[cfg(shuttle)]
+    fn take(&mut self) -> *mut T {
+      *self.inner.get_mut()
+    }
+  }
+
+  // SAFETY:
+  // - `read` returns null or a pointer from `Box::into_raw` in `write`. `evict`
+  //   leaks what it removes, so the pointer stays valid for the whole test.
+  // - `Inner` is a pointer-sized handle: a boxed shuttle `AtomicPtr`, or loom's
+  //   `AtomicPtr`, which the `PTab::new` size check covers. Dropping the handle
+  //   frees only the handle, never a `T`.
+  // - Every method is a loom or shuttle atomic operation, which is sound from
+  //   several threads at once for any `T`.
+  // - `evict` hands the removed entry to `retire`, which leaks it and never
+  //   drops it, so no guard sees a dropped value.
+  // - The handle adds no thread affinity, so moving it to another thread is
+  //   sound when `T: Send`.
+  unsafe impl<T> Atomic<T> for ModelAtomic<T> {
+    type Guard = ModelGuard;
+
+    type Shared<'guard>
+      = ModelShared<'guard, T>
+    where
+      T: 'guard;
+
+    fn null() -> Self {
+      #[cfg(loom)]
+      let inner: Inner<T> = Inner::new(ptr::null_mut());
+
+      #[cfg(shuttle)]
+      let inner: Inner<T> = Box::new(::shuttle::sync::atomic::AtomicPtr::new(ptr::null_mut()));
+
+      Self { inner }
+    }
+
+    fn read<'guard>(&self, order: Ordering, _guard: &'guard Self::Guard) -> Self::Shared<'guard> {
+      ModelShared {
+        pointer: self.inner.load(order),
+        phantom: PhantomData,
+      }
+    }
+
+    fn write(&self, order: Ordering, init: impl FnOnce(&mut MaybeUninit<T>))
+    where
+      T: 'static,
+    {
+      let mut uninit: Box<MaybeUninit<T>> = Box::new_uninit();
+
+      init(&mut uninit);
+
+      // SAFETY: the `init` closure is required to fully initialize `uninit`.
+      let old: *mut T = self
+        .inner
+        .swap(Box::into_raw(unsafe { uninit.assume_init() }), order);
+
+      assert!(old.is_null(), "ModelAtomic is occupied!");
+    }
+
+    fn evict(&self, order: Ordering) -> bool {
+      let pointer: *mut T = self.inner.swap(ptr::null_mut(), order);
+
+      if pointer.is_null() {
+        false
+      } else {
+        retire(pointer);
+        true
+      }
+    }
+
+    unsafe fn clear(&mut self) -> bool {
+      let pointer: *mut T = self.take();
+
+      if pointer.is_null() {
+        false
+      } else {
+        // SAFETY:
+        // - `pointer` came from `Box::into_raw` in `write`.
+        // - `&mut self` gives exclusive access, so the box is freed once.
+        drop(unsafe { Box::from_raw(pointer) });
+        true
+      }
+    }
+  }
+
+  /// A pointer read from a [`ModelAtomic`].
+  pub(crate) struct ModelShared<'guard, T> {
+    pointer: *mut T,
+    phantom: PhantomData<&'guard T>,
+  }
+
+  // SAFETY:
+  // - `as_ref` returns a reference only to a non-null pointer, which is the
+  //   `Box::into_raw` value of a live `T` (see the `Atomic` impl).
+  // - `as_ref` returns `None` exactly when `is_null` is `true`, because
+  //   `<*mut T>::as_ref` does.
+  unsafe impl<'guard, T> Shared<'guard, T> for ModelShared<'guard, T> {
+    fn is_null(&self) -> bool {
+      self.pointer.is_null()
+    }
+
+    fn as_ref(&self) -> Option<&'guard T> {
+      // SAFETY:
+      // - `pointer` is null or points to a `T` written by `write`.
+      // - Nothing is freed while the table is shared, so it stays valid.
+      unsafe { self.pointer.as_ref() }
+    }
+  }
+}
+
+// -----------------------------------------------------------------------------
+// Suites
+// -----------------------------------------------------------------------------
+
+macro_rules! suite {
+  ($suite:ident, $params:ty, [$($model:ident),* $(,)?]) => {
+    mod $suite {
+      $(
+        #[test]
+        fn $model() {
+          super::$model::<$params>();
+        }
+      )*
+    }
+  };
+}
+
+suite!(
+  tracked,
+  super::TrackedParams,
+  [
+    insert,
+    insert_sequential,
+    lookup,
+    remove,
+    insert_lookup,
+    insert_remove,
+    lookup_remove,
+    insert_lookup_remove,
+    capacity_race,
+    exists_remove,
+    with_remove,
+    read_unaffected_by_other_remove,
+    remove_and_reinsert,
+    concurrent_remove_reinsert,
+    remove_distinct,
+    lookup_remove_multi,
+    insert_three_way,
+    length_insert_remove,
+    insert_exists_read,
+  ]
+);
+
+suite!(
+  sdd,
+  super::SddParams,
+  [
+    remove,
+    insert_remove,
+    lookup_remove,
+    insert_lookup_remove,
+    exists_remove,
+    with_remove,
+    read_unaffected_by_other_remove,
+    remove_and_reinsert,
+    concurrent_remove_reinsert,
+    remove_distinct,
+    lookup_remove_multi,
+    length_insert_remove,
+  ]
+);
 
 // -----------------------------------------------------------------------------
 // Trace
@@ -154,26 +428,26 @@ impl WorkQueue {
     self.threads.borrow_mut().push(thread::spawn(f));
   }
 
-  fn spawn_insert<F>(&self, table: Arc<PTab>, count: usize, f: F)
+  fn spawn_insert<P: Model, F>(&self, table: Arc<PTab<P>>, count: usize, f: F)
   where
     F: Fn(usize) -> usize + Send + 'static,
   {
     self.spawn(move || Action::build(count, |index| Action::Insert(table.insert(f(index)))));
   }
 
-  fn spawn_lookup(&self, table: Arc<PTab>, count: usize, index: Detached) {
+  fn spawn_lookup<P: Model>(&self, table: Arc<PTab<P>>, count: usize, index: Detached) {
     self.spawn(move || Action::build(count, |_| Action::Lookup(table.read(index))));
   }
 
-  fn spawn_remove(&self, table: Arc<PTab>, count: usize, index: Detached) {
+  fn spawn_remove<P: Model>(&self, table: Arc<PTab<P>>, count: usize, index: Detached) {
     self.spawn(move || Action::build(count, |_| Action::Remove(table.remove(index))))
   }
 
-  fn spawn_exists(&self, table: Arc<PTab>, count: usize, index: Detached) {
+  fn spawn_exists<P: Model>(&self, table: Arc<PTab<P>>, count: usize, index: Detached) {
     self.spawn(move || Action::build(count, |_| Action::Exists(table.exists(index))));
   }
 
-  fn spawn_with(&self, table: Arc<PTab>, count: usize, index: Detached) {
+  fn spawn_with<P: Model>(&self, table: Arc<PTab<P>>, count: usize, index: Detached) {
     self.spawn(move || {
       Action::build(count, |_| {
         Action::With(table.with(index, |value| *value * 2))
@@ -181,7 +455,16 @@ impl WorkQueue {
     });
   }
 
-  fn spawn_remove_insert(&self, table: Arc<PTab>, index: Detached, value: usize) {
+  fn spawn_exists_read<P: Model>(&self, table: Arc<PTab<P>>, index: Detached) {
+    self.spawn(move || {
+      let exists: bool = table.exists(index);
+      let value: Option<usize> = table.read(index);
+
+      vec![Action::Exists(exists), Action::Lookup(value)]
+    });
+  }
+
+  fn spawn_remove_insert<P: Model>(&self, table: Arc<PTab<P>>, index: Detached, value: usize) {
     self.spawn(move || {
       let removed: bool = table.remove(index);
       let inserted: Option<Detached> = table.insert(value);
@@ -207,10 +490,9 @@ impl WorkQueue {
 // Actual Tests
 // -----------------------------------------------------------------------------
 
-#[test]
-fn insert() {
+fn insert<P: Model>() {
   driver::check(|| {
-    let table: Arc<PTab> = Arc::new(PTab::new());
+    let table: Arc<PTab<P>> = Arc::new(PTab::new());
     let queue: WorkQueue = WorkQueue::new();
 
     assert_eq!(table.len(), 0);
@@ -239,12 +521,11 @@ fn insert() {
   });
 }
 
-#[test]
-fn insert_sequential() {
+fn insert_sequential<P: Model>() {
   // Scenario: one thread inserts twice in a row while another inserts once.
   // Expected: `len` counts all three entries and each key is handed out once.
   driver::check(|| {
-    let table: Arc<PTab> = Arc::new(PTab::new());
+    let table: Arc<PTab<P>> = Arc::new(PTab::new());
     let queue: WorkQueue = WorkQueue::new();
 
     queue.spawn_insert(Arc::clone(&table), 2, |index| index);
@@ -261,10 +542,9 @@ fn insert_sequential() {
   });
 }
 
-#[test]
-fn lookup() {
+fn lookup<P: Model>() {
   driver::check(|| {
-    let table: Arc<PTab> = Arc::new(PTab::new());
+    let table: Arc<PTab<P>> = Arc::new(PTab::new());
     let queue: WorkQueue = WorkQueue::new();
     let index: Detached = table.insert(123).unwrap();
 
@@ -289,10 +569,9 @@ fn lookup() {
   });
 }
 
-#[test]
-fn remove() {
+fn remove<P: Model>() {
   driver::check(|| {
-    let table: Arc<PTab> = Arc::new(PTab::new());
+    let table: Arc<PTab<P>> = Arc::new(PTab::new());
     let queue: WorkQueue = WorkQueue::new();
     let index: Detached = table.insert(123).unwrap();
 
@@ -317,39 +596,37 @@ fn remove() {
   });
 }
 
-#[test]
-fn insert_lookup() {
+fn insert_lookup<P: Model>() {
   driver::check(|| {
-    let table: Arc<PTab> = Arc::new(PTab::new());
+    let table: Arc<PTab<P>> = Arc::new(PTab::new());
     let queue: WorkQueue = WorkQueue::new();
     let index: Detached = table.insert(123).unwrap();
 
     assert_eq!(table.len(), 1);
 
     queue.spawn_insert(Arc::clone(&table), 1, |index| index);
-    queue.spawn_lookup(Arc::clone(&table), 1000, index);
+    queue.spawn_lookup(Arc::clone(&table), LOOKUPS, index);
     queue.spawn_insert(Arc::clone(&table), 1, |index| index);
-    queue.spawn_lookup(Arc::clone(&table), 1000, index);
+    queue.spawn_lookup(Arc::clone(&table), LOOKUPS, index);
 
     let trace: Trace = queue.join();
 
     assert_eq!(table.len(), 3);
     assert_eq!(trace.inserts.len(), 2);
-    assert_eq!(trace.lookups.len(), 2000);
+    assert_eq!(trace.lookups.len(), 2 * LOOKUPS);
     assert_eq!(trace.removes.len(), 0);
 
     assert!(trace.inserts.count(1, &Some(Detached::from_bits(1))));
     assert!(trace.inserts.count(1, &Some(Detached::from_bits(2))));
-    assert!(trace.lookups.count(2000, &Some(123)));
+    assert!(trace.lookups.count(2 * LOOKUPS, &Some(123)));
 
     assert_eq!(table.read(index), Some(123));
   });
 }
 
-#[test]
-fn insert_remove() {
+fn insert_remove<P: Model>() {
   driver::check(|| {
-    let table: Arc<PTab> = Arc::new(PTab::new());
+    let table: Arc<PTab<P>> = Arc::new(PTab::new());
     let queue: WorkQueue = WorkQueue::new();
     let index: Detached = table.insert(123).unwrap();
 
@@ -376,10 +653,9 @@ fn insert_remove() {
   });
 }
 
-#[test]
-fn lookup_remove() {
+fn lookup_remove<P: Model>() {
   driver::check(|| {
-    let table: Arc<PTab> = Arc::new(PTab::new());
+    let table: Arc<PTab<P>> = Arc::new(PTab::new());
     let queue: WorkQueue = WorkQueue::new();
     let index: Detached = table.insert(123).unwrap();
 
@@ -406,10 +682,9 @@ fn lookup_remove() {
   });
 }
 
-#[test]
-fn insert_lookup_remove() {
+fn insert_lookup_remove<P: Model>() {
   driver::check(|| {
-    let table: Arc<PTab> = Arc::new(PTab::new());
+    let table: Arc<PTab<P>> = Arc::new(PTab::new());
     let queue: WorkQueue = WorkQueue::new();
     let index: Detached = table.insert(123).unwrap();
 
@@ -434,10 +709,9 @@ fn insert_lookup_remove() {
   });
 }
 
-#[test]
-fn capacity_race() {
+fn capacity_race<P: Model>() {
   driver::check(|| {
-    let table: Arc<PTab> = Arc::new(PTab::new());
+    let table: Arc<PTab<P>> = Arc::new(PTab::new());
     let queue: WorkQueue = WorkQueue::new();
 
     for index in 0..table.capacity() - 1 {
@@ -467,13 +741,12 @@ fn capacity_race() {
   });
 }
 
-#[test]
-fn exists_remove() {
+fn exists_remove<P: Model>() {
   // Scenario: two threads check a key while two others remove it.
   // Expected: exactly one remove succeeds, each check sees either state, and
   // the key is gone afterwards.
   driver::check(|| {
-    let table: Arc<PTab> = Arc::new(PTab::new());
+    let table: Arc<PTab<P>> = Arc::new(PTab::new());
     let queue: WorkQueue = WorkQueue::new();
     let index: Detached = table.insert(123).unwrap();
 
@@ -495,12 +768,11 @@ fn exists_remove() {
   });
 }
 
-#[test]
-fn with_remove() {
+fn with_remove<P: Model>() {
   // Scenario: two threads run a closure on a value while another removes it.
   // Expected: a closure sees the whole value or nothing, never anything else.
   driver::check(|| {
-    let table: Arc<PTab> = Arc::new(PTab::new());
+    let table: Arc<PTab<P>> = Arc::new(PTab::new());
     let queue: WorkQueue = WorkQueue::new();
     let index: Detached = table.insert(123).unwrap();
 
@@ -522,12 +794,11 @@ fn with_remove() {
   });
 }
 
-#[test]
-fn read_unaffected_by_other_remove() {
+fn read_unaffected_by_other_remove<P: Model>() {
   // Scenario: one thread reads a key while another removes a different key.
   // Expected: the read always sees its own value.
   driver::check(|| {
-    let table: Arc<PTab> = Arc::new(PTab::new());
+    let table: Arc<PTab<P>> = Arc::new(PTab::new());
     let queue: WorkQueue = WorkQueue::new();
     let index_a: Detached = table.insert(111).unwrap();
     let index_b: Detached = table.insert(222).unwrap();
@@ -546,13 +817,12 @@ fn read_unaffected_by_other_remove() {
   });
 }
 
-#[test]
-fn remove_and_reinsert() {
+fn remove_and_reinsert<P: Model>() {
   // Scenario: a full table has one key removed while another thread inserts.
   // Expected: the insert either misses the free slot or gets a fresh key that
   // reads back its value.
   driver::check(|| {
-    let table: Arc<PTab> = Arc::new(PTab::new());
+    let table: Arc<PTab<P>> = Arc::new(PTab::new());
     let queue: WorkQueue = WorkQueue::new();
     let mut keys: Vec<Detached> = Vec::with_capacity(table.capacity());
 
@@ -581,12 +851,11 @@ fn remove_and_reinsert() {
   });
 }
 
-#[test]
-fn concurrent_remove_reinsert() {
+fn concurrent_remove_reinsert<P: Model>() {
   // Scenario: two threads each remove a key from a full table, then insert.
   // Expected: both inserts may succeed, with distinct keys and intact values.
   driver::check(|| {
-    let table: Arc<PTab> = Arc::new(PTab::new());
+    let table: Arc<PTab<P>> = Arc::new(PTab::new());
     let queue: WorkQueue = WorkQueue::new();
     let mut keys: Vec<Detached> = Vec::with_capacity(table.capacity());
 
@@ -619,10 +888,9 @@ fn concurrent_remove_reinsert() {
   });
 }
 
-#[test]
-fn remove_distinct() {
+fn remove_distinct<P: Model>() {
   driver::check(|| {
-    let table: Arc<PTab> = Arc::new(PTab::new());
+    let table: Arc<PTab<P>> = Arc::new(PTab::new());
     let queue: WorkQueue = WorkQueue::new();
     let index_a: Detached = table.insert(1).unwrap();
     let index_b: Detached = table.insert(2).unwrap();
@@ -641,10 +909,9 @@ fn remove_distinct() {
   });
 }
 
-#[test]
-fn lookup_remove_multi() {
+fn lookup_remove_multi<P: Model>() {
   driver::check(|| {
-    let table: Arc<PTab> = Arc::new(PTab::new());
+    let table: Arc<PTab<P>> = Arc::new(PTab::new());
     let queue: WorkQueue = WorkQueue::new();
     let index: Detached = table.insert(123).unwrap();
 
@@ -666,10 +933,9 @@ fn lookup_remove_multi() {
   });
 }
 
-#[test]
-fn insert_three_way() {
+fn insert_three_way<P: Model>() {
   driver::check(|| {
-    let table: Arc<PTab> = Arc::new(PTab::new());
+    let table: Arc<PTab<P>> = Arc::new(PTab::new());
     let queue: WorkQueue = WorkQueue::new();
 
     queue.spawn_insert(Arc::clone(&table), 1, |index| index);
@@ -687,10 +953,9 @@ fn insert_three_way() {
   });
 }
 
-#[test]
-fn length_insert_remove() {
+fn length_insert_remove<P: Model>() {
   driver::check(|| {
-    let table: Arc<PTab> = Arc::new(PTab::new());
+    let table: Arc<PTab<P>> = Arc::new(PTab::new());
     let queue: WorkQueue = WorkQueue::new();
     let index: Detached = table.insert(1).unwrap();
 
@@ -704,5 +969,28 @@ fn length_insert_remove() {
     assert_eq!(trace.removes.len(), 1);
 
     assert!(trace.removes.count(1, &true));
+  });
+}
+
+fn insert_exists_read<P: Model>() {
+  // Scenario: one thread inserts while another checks the new key, then reads
+  // it.
+  // Expected: once the check sees the key, the read returns its value.
+  driver::check(|| {
+    let table: Arc<PTab<P>> = Arc::new(PTab::new());
+    let queue: WorkQueue = WorkQueue::new();
+    let index: Detached = Detached::from_bits(0);
+
+    queue.spawn_insert(Arc::clone(&table), 1, |_| 123);
+    queue.spawn_exists_read(Arc::clone(&table), index);
+
+    let trace: Trace = queue.join();
+
+    assert!(trace.inserts.count(1, &Some(index)));
+
+    let exists: bool = trace.exists.inner[0];
+    let value: Option<usize> = trace.lookups.inner[0];
+
+    assert!(!exists || value == Some(123));
   });
 }
