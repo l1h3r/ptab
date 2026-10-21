@@ -60,11 +60,19 @@ impl CollectorWeak for Sdd {
 /// An atomic pointer to an entry owned by [`sdd`].
 ///
 /// A crate-private wrapper, so the reclamation traits are implemented only on
-/// types this crate builds.
+/// types this crate builds. A bare `sdd::AtomicOwned` is not an [`Atomic`]; the
+/// doctests for that are in the `sdd_atomic` module below.
 #[repr(transparent)]
 pub struct SddAtomic<T>(sdd::AtomicOwned<T>);
 
-impl<T> Atomic<T> for SddAtomic<T> {
+// SAFETY:
+// - `read` loads the `sdd::AtomicOwned` under a `sdd::Guard`, giving a pointer
+//   that is null or a valid `T` that sdd keeps live while the guard is.
+// - `SddAtomic` is `repr(transparent)` over `sdd::AtomicOwned`, the size and
+//   alignment of `usize` (const-asserted for the collector).
+// - `evict` swaps out the `sdd::Owned` and drops it, which hands the entry to
+//   sdd's collector for deferred destruction.
+unsafe impl<T> Atomic<T> for SddAtomic<T> {
   type Guard = sdd::Guard;
 
   #[rustfmt::skip]
@@ -136,6 +144,34 @@ impl<T> Atomic<T> for SddAtomic<T> {
   }
 }
 
+// The doctests live here because private items can't carry doctests under
+// `rustdoc::private_doc_tests`.
+#[cfg(doctest)]
+mod sdd_atomic {
+  /// A bare `sdd::AtomicOwned` does not implement `ptab::memory::Atomic`.
+  ///
+  /// ```compile_fail,E0277
+  /// use core::sync::atomic::Ordering;
+  /// use ptab::memory::Atomic;
+  ///
+  /// let ptr: sdd::AtomicOwned<u8> = Atomic::null();
+  /// let guard: sdd::Guard = sdd::Guard::new();
+  /// let _ = Atomic::read(&ptr, Ordering::Acquire, &guard);
+  /// ```
+  ///
+  /// ```
+  /// use core::sync::atomic::Ordering;
+  /// use ptab::memory::Atomic;
+  /// use ptab::memory::CollectorWeak;
+  /// use ptab::memory::collector::Sdd;
+  ///
+  /// let ptr: <Sdd as CollectorWeak>::Atomic<u8> = Atomic::null();
+  /// let guard: sdd::Guard = sdd::Guard::new();
+  /// let _ = Atomic::read(&ptr, Ordering::Acquire, &guard);
+  /// ```
+  const NOT_ATOMIC_OWNED: () = ();
+}
+
 // -----------------------------------------------------------------------------
 // Shared Ptr
 // -----------------------------------------------------------------------------
@@ -144,7 +180,10 @@ impl<T> Atomic<T> for SddAtomic<T> {
 #[repr(transparent)]
 pub struct SddPtr<'guard, T>(sdd::Ptr<'guard, T>);
 
-impl<'guard, T> Shared<'guard, T> for SddPtr<'guard, T> {
+// SAFETY: `SddPtr` is only built by `SddAtomic::read`, so it is null or points to
+// a `T` that sdd keeps live for `'guard`. `is_null` and `as_ref` both test the
+// same inner pointer, so they agree.
+unsafe impl<'guard, T> Shared<'guard, T> for SddPtr<'guard, T> {
   #[inline]
   fn is_null(&self) -> bool {
     self.0.is_null()

@@ -44,7 +44,14 @@ impl CollectorWeak for Leak {
 #[repr(transparent)]
 pub struct Slot<T>(AtomicPtr<T>);
 
-impl<T> Atomic<T> for Slot<T> {
+// SAFETY:
+// - `read` loads the `AtomicPtr`, which holds null or a `Box::into_raw` pointer
+//   from `write`; `evict` never frees it, so it stays live past any guard.
+// - `Slot` is `repr(transparent)` over `AtomicPtr`, the size and alignment of
+//   `usize`.
+// - `evict` swaps the pointer out and leaks the entry, so no reader can see it
+//   freed.
+unsafe impl<T> Atomic<T> for Slot<T> {
   type Guard = ();
 
   #[rustfmt::skip]
@@ -122,7 +129,10 @@ pub struct Ptr<'guard, T> {
   phantom: PhantomData<&'guard T>,
 }
 
-impl<'guard, T> Shared<'guard, T> for Ptr<'guard, T> {
+// SAFETY: `Ptr` is only built by `Slot::read`, so `pointer` is null or points to
+// a leaked `Box<T>` that is never freed while the table is shared. `is_null`
+// and `as_ref` agree because both test `pointer`.
+unsafe impl<'guard, T> Shared<'guard, T> for Ptr<'guard, T> {
   #[inline]
   fn is_null(&self) -> bool {
     self.pointer.is_null()

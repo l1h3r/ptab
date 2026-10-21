@@ -104,7 +104,57 @@ pub trait CollectorWeak {
 // -----------------------------------------------------------------------------
 
 /// An atomic pointer that can be safely shared between threads.
-pub trait Atomic<T> {
+///
+/// # Safety
+///
+/// The table relies on the following. An implementation must uphold all of it.
+///
+/// - [`read`] returns either null or a pointer to a valid `T` that stays live
+///   for the guard's lifetime.
+/// - `Self` has the size and alignment of `usize`.
+/// - [`evict`] hands the evicted entry to the collector, which does not drop it
+///   while a guard that could have read it is live.
+///
+/// A safe `impl` is rejected, because the trait is `unsafe`:
+///
+/// ```compile_fail,E0200
+/// use core::mem::MaybeUninit;
+/// use core::sync::atomic::Ordering;
+/// use ptab::memory::{Atomic, Shared};
+///
+/// struct Ptr;
+/// struct Slot;
+///
+/// unsafe impl<'guard> Shared<'guard, u8> for Ptr {
+///   fn is_null(&self) -> bool { true }
+///   fn as_ref(&self) -> Option<&'guard u8> { None }
+/// }
+///
+/// impl Atomic<u8> for Slot {
+///   type Guard = ();
+///   type Shared<'guard> = Ptr;
+///   fn null() -> Self { Slot }
+///   fn read<'guard>(&self, _: Ordering, _: &'guard ()) -> Ptr { Ptr }
+///   fn write(&self, _: Ordering, _: impl FnOnce(&mut MaybeUninit<u8>)) {}
+///   fn evict(&self, _: Ordering) -> bool { false }
+///   unsafe fn clear(&mut self) -> bool { false }
+/// }
+/// ```
+///
+/// A bare [`AtomicPtr`] does not implement it:
+///
+/// ```compile_fail,E0277
+/// use core::sync::atomic::{AtomicPtr, Ordering};
+/// use ptab::memory::Atomic;
+///
+/// let ptr: AtomicPtr<u8> = AtomicPtr::new(core::ptr::null_mut());
+/// let _ = Atomic::read(&ptr, Ordering::Acquire, &());
+/// ```
+///
+/// [`read`]: Self::read
+/// [`evict`]: Self::evict
+/// [`AtomicPtr`]: core::sync::atomic::AtomicPtr
+pub unsafe trait Atomic<T> {
   /// A guard that keeps the current thread pinned.
   type Guard;
 
@@ -167,7 +217,28 @@ pub trait Atomic<T> {
 /// A pointer to an object protected by the epoch GC.
 ///
 /// The pointer is valid for use only during the lifetime `'guard`.
-pub trait Shared<'guard, T> {
+///
+/// # Safety
+///
+/// [`as_ref`] returns either `None` or a reference to a valid `T` that is live
+/// for `'guard`, and it returns `None` exactly when [`is_null`] is `true`.
+///
+/// A safe `impl` is rejected, because the trait is `unsafe`:
+///
+/// ```compile_fail,E0200
+/// use ptab::memory::Shared;
+///
+/// struct Ptr;
+///
+/// impl<'guard> Shared<'guard, u8> for Ptr {
+///   fn is_null(&self) -> bool { true }
+///   fn as_ref(&self) -> Option<&'guard u8> { None }
+/// }
+/// ```
+///
+/// [`as_ref`]: Self::as_ref
+/// [`is_null`]: Self::is_null
+pub unsafe trait Shared<'guard, T> {
   /// Returns `true` if the pointer is null.
   fn is_null(&self) -> bool;
 
