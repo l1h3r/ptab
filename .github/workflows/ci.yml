@@ -95,7 +95,7 @@ jobs:
       - run: cargo docs-rs
 
   miri:
-    name: Miri ${{ matrix.target || 'host' }}
+    name: Miri ${{ matrix.target || 'host' }}${{ matrix.features && ' Leak' || '' }}
     needs: pre_ci
     if: needs.pre_ci.outputs.continue
     runs-on: ubuntu-latest
@@ -110,11 +110,20 @@ jobs:
             seeds: 0..4
           - target: i686-unknown-linux-gnu
             seeds: 0..4
+          - target: ""
+            seeds: 0..32
+            features: --no-default-features --features std
+          - target: s390x-unknown-linux-gnu
+            seeds: 0..4
+            features: --no-default-features --features std
+          - target: i686-unknown-linux-gnu
+            seeds: 0..4
+            features: --no-default-features --features std
     steps:
       - uses: actions/checkout@v6
       - uses: dtolnay/rust-toolchain@miri
       - run: cargo miri setup ${{ matrix.target && format('--target {0}', matrix.target) || '' }}
-      - run: cargo miri test ${{ matrix.target && format('--target {0}', matrix.target) || '' }}
+      - run: cargo miri test ${{ matrix.target && format('--target {0}', matrix.target) || '' }} ${{ matrix.features }}
         env:
           MIRIFLAGS: -Zmiri-strict-provenance -Zmiri-many-seeds=${{ matrix.seeds }}
           RUSTFLAGS: --cfg ptab_miri
