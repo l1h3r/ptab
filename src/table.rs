@@ -811,6 +811,26 @@ mod tests {
     }
   }
 
+  // Scenario: The data array is allocated in `usize` slots.
+  // Expected: Each collector's `Atomic<T>` matches `usize` for any `T`.
+  #[test]
+  fn collector_atomic_matches_usize() {
+    use crate::reclaim::CollectorWeak;
+    use crate::reclaim::collector::Leak;
+
+    fn check<C: CollectorWeak>() {
+      assert_eq!(size_of::<C::Atomic<u64>>(), size_of::<usize>());
+      assert_eq!(align_of::<C::Atomic<u64>>(), align_of::<usize>());
+      assert_eq!(size_of::<C::Atomic<[u8; 64]>>(), size_of::<usize>());
+      assert_eq!(align_of::<C::Atomic<[u8; 64]>>(), align_of::<usize>());
+    }
+
+    check::<Leak>();
+
+    #[cfg(feature = "sdd")]
+    check::<crate::reclaim::collector::Sdd>();
+  }
+
   #[test]
   fn new_slot_array() {
     let array: SlotArray<DefParams> = ReadOnly::new_slot_array();

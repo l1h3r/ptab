@@ -58,6 +58,97 @@ pub unsafe trait Collector: CollectorWeak {}
 /// - Reclamation of objects reachable by that guard must be deferred.
 /// - Returned [`Shared`] pointers are guaranteed valid for the guard lifetime.
 ///
+/// # Atomic size
+///
+/// `Atomic<T>` must have the size and alignment of `usize`, because the table
+/// sizes its arrays in `usize` slots. `PTab::new` rejects any other size when
+/// the table is built. The check runs at codegen, so `cargo check` does not
+/// report it; `cargo build` does. A four-word `Atomic` fails to build:
+///
+/// ```compile_fail
+/// use core::mem::MaybeUninit;
+/// use core::sync::atomic::Ordering;
+/// use ptab::memory::{Atomic, CollectorWeak, Shared};
+/// use ptab::{PTab, Params};
+///
+/// #[repr(C)]
+/// struct Wide([usize; 4]);
+/// struct Ptr;
+/// struct Weak;
+/// struct P;
+///
+/// unsafe impl<'guard, T> Shared<'guard, T> for Ptr {
+///   fn is_null(&self) -> bool { true }
+///   fn as_ref(&self) -> Option<&'guard T> { None }
+/// }
+///
+/// unsafe impl<T> Atomic<T> for Wide {
+///   type Guard = ();
+///   type Shared<'guard> = Ptr where T: 'guard;
+///   fn null() -> Self { Wide([0; 4]) }
+///   fn read<'guard>(&self, _: Ordering, _: &'guard ()) -> Ptr { Ptr }
+///   fn write(&self, _: Ordering, _: impl FnOnce(&mut MaybeUninit<T>)) where T: 'static {}
+///   fn evict(&self, _: Ordering) -> bool { false }
+///   unsafe fn clear(&mut self) -> bool { false }
+/// }
+///
+/// impl CollectorWeak for Weak {
+///   type Guard = ();
+///   type Atomic<T> = Wide;
+///   fn guard() {}
+///   fn flush() {}
+/// }
+///
+/// impl Params for P {
+///   type Collector = Weak;
+/// }
+///
+/// let _table: PTab<u8, P> = PTab::new();
+/// ```
+///
+/// The same collector with a `usize`-wide `Atomic` builds:
+///
+/// ```
+/// use core::mem::MaybeUninit;
+/// use core::sync::atomic::Ordering;
+/// use ptab::memory::{Atomic, CollectorWeak, Shared};
+/// use ptab::{PTab, Params};
+///
+/// #[repr(C)]
+/// struct Wide(usize);
+/// struct Ptr;
+/// struct Weak;
+/// struct P;
+///
+/// unsafe impl<'guard, T> Shared<'guard, T> for Ptr {
+///   fn is_null(&self) -> bool { true }
+///   fn as_ref(&self) -> Option<&'guard T> { None }
+/// }
+///
+/// unsafe impl<T> Atomic<T> for Wide {
+///   type Guard = ();
+///   type Shared<'guard> = Ptr where T: 'guard;
+///   fn null() -> Self { Wide(0) }
+///   fn read<'guard>(&self, _: Ordering, _: &'guard ()) -> Ptr { Ptr }
+///   fn write(&self, _: Ordering, _: impl FnOnce(&mut MaybeUninit<T>)) where T: 'static {}
+///   fn evict(&self, _: Ordering) -> bool { false }
+///   unsafe fn clear(&mut self) -> bool { false }
+/// }
+///
+/// impl CollectorWeak for Weak {
+///   type Guard = ();
+///   type Atomic<T> = Wide;
+///   fn guard() {}
+///   fn flush() {}
+/// }
+///
+/// impl Params for P {
+///   type Collector = Weak;
+/// }
+///
+/// let _table: PTab<u8, P> = PTab::new();
+/// ```
+///
 /// [`Atomic`]: crate::reclaim::CollectorWeak::Atomic
 /// [`Atomic::read()`]: crate::reclaim::Atomic::read
 /// [`Atomic::evict()`]: crate::reclaim::Atomic::evict
@@ -66,13 +157,6 @@ pub unsafe trait Collector: CollectorWeak {}
 /// [`Guard`]: crate::reclaim::CollectorWeak::Guard
 /// [`Shared`]: crate::reclaim::Atomic::Shared
 pub trait CollectorWeak {
-  /// Ensure `Atomic<T>` has the same size and alignment as a raw pointer.
-  #[doc(hidden)]
-  const ASSERT_ATOMIC: () = {
-    assert!(align_of::<Self::Atomic<()>>() == align_of::<usize>());
-    assert!(size_of::<Self::Atomic<()>>() == size_of::<usize>());
-  };
-
   /// A guard that keeps the current thread pinned.
   type Guard;
 
@@ -125,17 +209,17 @@ pub trait CollectorWeak {
 /// struct Ptr;
 /// struct Slot;
 ///
-/// unsafe impl<'guard> Shared<'guard, u8> for Ptr {
+/// unsafe impl<'guard, T> Shared<'guard, T> for Ptr {
 ///   fn is_null(&self) -> bool { true }
-///   fn as_ref(&self) -> Option<&'guard u8> { None }
+///   fn as_ref(&self) -> Option<&'guard T> { None }
 /// }
 ///
 /// impl Atomic<u8> for Slot {
 ///   type Guard = ();
-///   type Shared<'guard> = Ptr;
+///   type Shared<'guard> = Ptr where T: 'guard;
 ///   fn null() -> Self { Slot }
 ///   fn read<'guard>(&self, _: Ordering, _: &'guard ()) -> Ptr { Ptr }
-///   fn write(&self, _: Ordering, _: impl FnOnce(&mut MaybeUninit<u8>)) {}
+///   fn write(&self, _: Ordering, _: impl FnOnce(&mut MaybeUninit<T>)) where T: 'static {}
 ///   fn evict(&self, _: Ordering) -> bool { false }
 ///   unsafe fn clear(&mut self) -> bool { false }
 /// }

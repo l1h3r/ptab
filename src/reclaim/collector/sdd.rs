@@ -69,7 +69,7 @@ pub struct SddAtomic<T>(sdd::AtomicOwned<T>);
 // - `read` loads the `sdd::AtomicOwned` under a `sdd::Guard`, giving a pointer
 //   that is null or a valid `T` that sdd keeps live while the guard is.
 // - `SddAtomic` is `repr(transparent)` over `sdd::AtomicOwned`, the size and
-//   alignment of `usize` (const-asserted for the collector).
+//   alignment of `usize` (const-asserted in `Array::new_uninit`).
 // - `evict` swaps out the `sdd::Owned` and drops it, which hands the entry to
 //   sdd's collector for deferred destruction.
 unsafe impl<T> Atomic<T> for SddAtomic<T> {
