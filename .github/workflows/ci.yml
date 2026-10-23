@@ -9,7 +9,8 @@ permissions:
   contents: read
 
 env:
-  RUSTFLAGS: -Dwarnings
+  CARGO_BUILD_WARNINGS: deny
+  CARGO_REGISTRY_GLOBAL_MIN_PUBLISH_AGE: 3 days
 
 jobs:
   pre_ci:
@@ -30,7 +31,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@master
         with:
           toolchain: ${{matrix.rust}}
-      - run: cargo test --features slow
+      - run: cargo test
 
   loom:
     name: Loom ${{matrix.rust}}
@@ -72,6 +73,8 @@ jobs:
     if: needs.pre_ci.outputs.continue
     runs-on: ubuntu-latest
     timeout-minutes: 45
+    env:
+      RUSTFLAGS: -Dwarnings
     steps:
       - uses: actions/checkout@v6
       - uses: dtolnay/rust-toolchain@1.91.0
@@ -92,18 +95,38 @@ jobs:
       - run: cargo docs-rs
 
   miri:
-    name: Miri
+    name: Miri ${{ matrix.target || 'host' }}${{ matrix.features && ' Leak' || '' }}
     needs: pre_ci
     if: needs.pre_ci.outputs.continue
     runs-on: ubuntu-latest
     timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: ""
+            seeds: 0..32
+          - target: s390x-unknown-linux-gnu
+            seeds: 0..4
+          - target: i686-unknown-linux-gnu
+            seeds: 0..4
+          - target: ""
+            seeds: 0..32
+            features: --no-default-features --features std
+          - target: s390x-unknown-linux-gnu
+            seeds: 0..4
+            features: --no-default-features --features std
+          - target: i686-unknown-linux-gnu
+            seeds: 0..4
+            features: --no-default-features --features std
     steps:
       - uses: actions/checkout@v6
       - uses: dtolnay/rust-toolchain@miri
-      - run: cargo miri setup
-      - run: cargo miri test
+      - run: cargo miri setup ${{ matrix.target && format('--target {0}', matrix.target) || '' }}
+      - run: cargo miri test ${{ matrix.target && format('--target {0}', matrix.target) || '' }} ${{ matrix.features }}
         env:
-          MIRIFLAGS: -Zmiri-strict-provenance
+          MIRIFLAGS: -Zmiri-strict-provenance -Zmiri-many-seeds=${{ matrix.seeds }}
+          RUSTFLAGS: --cfg ptab_miri
 
   fmt:
     name: Format
@@ -128,6 +151,7 @@ jobs:
       - uses: actions/checkout@v6
       - uses: dtolnay/rust-toolchain@stable
       - run: cargo build --no-default-features --features alloc
+      - run: cargo test --no-default-features --features alloc
 
   clippy:
     name: Clippy
@@ -149,10 +173,9 @@ jobs:
       - uses: actions/checkout@v6
       - uses: dtolnay/rust-toolchain@nightly
         with:
-          components: rust-src
-      - run: cargo test --lib --target x86_64-unknown-linux-gnu -Zbuild-std
+          targets: x86_64-unknown-linux-gnuasan
+      - run: cargo test --lib --target x86_64-unknown-linux-gnuasan
         env:
-          RUSTFLAGS: -Zsanitizer=address
           ASAN_OPTIONS: detect_leaks=0
 
   tsan:
@@ -165,7 +188,35 @@ jobs:
       - uses: actions/checkout@v6
       - uses: dtolnay/rust-toolchain@nightly
         with:
-          components: rust-src
-      - run: cargo test --lib --target x86_64-unknown-linux-gnu -Zbuild-std
+          targets: x86_64-unknown-linux-gnutsan
+      - run: cargo test --lib --target x86_64-unknown-linux-gnutsan
+
+  kani:
+    name: Kani (${{matrix.name}})
+    needs: pre_ci
+    if: needs.pre_ci.outputs.continue
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: host cache line
+            rustflags: --cap-lints=warn
+          - name: 16-byte cache line
+            rustflags: --cap-lints=warn --cfg ptab_kani_cache_line="16"
+          - name: 32-byte cache line
+            rustflags: --cap-lints=warn --cfg ptab_kani_cache_line="32"
+          - name: 64-byte cache line
+            rustflags: --cap-lints=warn --cfg ptab_kani_cache_line="64"
+          - name: 128-byte cache line
+            rustflags: --cap-lints=warn --cfg ptab_kani_cache_line="128"
+          - name: 256-byte cache line
+            rustflags: --cap-lints=warn --cfg ptab_kani_cache_line="256"
+    steps:
+      - uses: actions/checkout@v6
+      - uses: model-checking/kani-github-action@v1
+        with:
+          kani-version: 0.68.0
         env:
-          RUSTFLAGS: -Zsanitizer=thread
+          RUSTFLAGS: ${{matrix.rustflags}}

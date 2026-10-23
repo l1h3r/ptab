@@ -2,6 +2,7 @@ use core::fmt::Debug;
 use core::fmt::Display;
 use core::fmt::Formatter;
 use core::fmt::Result;
+use core::marker::PhantomData;
 
 use crate::params::Params;
 use crate::params::ParamsExt as _;
@@ -21,14 +22,6 @@ macro_rules! internal_index {
     where
       P: ?Sized,
     {
-      #[inline]
-      pub(crate) const fn new(source: usize) -> Self {
-        Self {
-          source,
-          marker: ::core::marker::PhantomData,
-        }
-      }
-
       #[inline]
       pub(crate) const fn get(self) -> usize {
         self.source
@@ -208,6 +201,19 @@ internal_index!(Abstract);
 
 impl<P> Abstract<P>
 where
+  P: ?Sized,
+{
+  #[inline]
+  pub(crate) const fn new(source: usize) -> Self {
+    Self {
+      source,
+      marker: PhantomData,
+    }
+  }
+}
+
+impl<P> Abstract<P>
+where
   P: Params + ?Sized,
 {
   #[inline]
@@ -226,6 +232,21 @@ impl<P> Concrete<P>
 where
   P: Params + ?Sized,
 {
+  /// Creates a [`Concrete`] index from a raw value.
+  ///
+  /// # Safety
+  ///
+  /// `source` must be strictly less than `P::LENGTH`.
+  #[inline]
+  pub(crate) const unsafe fn new(source: usize) -> Self {
+    debug_assert!(source < P::LENGTH.as_usize());
+
+    Self {
+      source,
+      marker: PhantomData,
+    }
+  }
+
   #[inline]
   pub(crate) const fn from_abstract(other: Abstract<P>) -> Self {
     abstract_to_concrete(other)
@@ -234,6 +255,38 @@ where
   #[inline]
   pub(crate) const fn from_detached(other: Detached) -> Self {
     detached_to_concrete(other)
+  }
+}
+
+// -----------------------------------------------------------------------------
+// Index Assertions
+// -----------------------------------------------------------------------------
+
+/// Post-monomorphization checks on the index masks of `P`.
+struct AssertIndexMasks<P>(PhantomData<fn(P)>)
+where
+  P: ?Sized;
+
+impl<P> AssertIndexMasks<P>
+where
+  P: Params + ?Sized,
+{
+  /// ID_MASK_COVERS_LENGTH: the block and slot masks together address exactly
+  /// `0..LENGTH`.
+  const COVERS: () = assert!(
+    Self::covers(P::ID_MASK_BLOCK, P::ID_MASK_INDEX, P::LENGTH.as_usize()),
+    "invalid params: index masks must address exactly `0..LENGTH`",
+  );
+
+  /// Returns `true` if a block mask and a slot mask address exactly `length` slots.
+  const fn covers(mask_block: usize, mask_index: usize, length: usize) -> bool {
+    match (mask_block.checked_add(1), mask_index.checked_add(1)) {
+      (Some(blocks), Some(slots)) => match blocks.checked_mul(slots) {
+        Some(total) => total == length,
+        None => false,
+      },
+      _ => false,
+    }
   }
 }
 
@@ -259,7 +312,9 @@ const fn detached_to_concrete<P>(detached: Detached) -> Concrete<P>
 where
   P: Params + ?Sized,
 {
-  Concrete::new(detached.into_bits() & P::ID_MASK_ENTRY)
+  // SAFETY: `ID_MASK_ENTRY == LENGTH - 1`, so the masked value is strictly
+  //         less than `LENGTH`.
+  unsafe { Concrete::new(detached.into_bits() & P::ID_MASK_ENTRY) }
 }
 
 /// Converts an [`Abstract`] sequential index to a [`Concrete`] cache-aware index.
@@ -268,10 +323,13 @@ const fn abstract_to_concrete<P>(abstract_idx: Abstract<P>) -> Concrete<P>
 where
   P: Params + ?Sized,
 {
+  let () = AssertIndexMasks::<P>::COVERS;
   let mut value: usize = 0;
   value += (abstract_idx.get() & P::ID_MASK_BLOCK) << P::ID_SHIFT_BLOCK;
   value += (abstract_idx.get() >> P::ID_SHIFT_INDEX) & P::ID_MASK_INDEX;
-  Concrete::new(value)
+  // SAFETY: `AssertIndexMasks::<P>::COVERS` fails the build unless the block and
+  //         slot masks address exactly `0..LENGTH`, so `value` is less than `LENGTH`.
+  unsafe { Concrete::new(value) }
 }
 
 /// Converts an [`Abstract`] sequential index to a [`Detached`] index.
@@ -297,9 +355,11 @@ mod tests {
   use std::collections::HashSet;
 
   use crate::index::Abstract;
+  use crate::index::AssertIndexMasks;
   use crate::index::Concrete;
   use crate::index::Detached;
   use crate::params::CACHE_LINE_SLOTS;
+  use crate::params::DefaultParams;
   use crate::params::Params as _;
   use crate::params::ParamsExt as _;
   use crate::utils::each_capacity;
@@ -319,9 +379,10 @@ mod tests {
   #[expect(clippy::clone_on_copy, reason = "exercises the `Clone` impl")]
   #[test]
   fn concrete_clone_copy() {
-    let a: Concrete<()> = Concrete::new(123);
-    let b: Concrete<()> = a.clone();
-    let c: Concrete<()> = b;
+    // SAFETY: 7 is below the minimum capacity of 16.
+    let a: Concrete<DefaultParams> = unsafe { Concrete::new(7) };
+    let b: Concrete<DefaultParams> = a.clone();
+    let c: Concrete<DefaultParams> = b;
 
     assert_eq!(a, b);
     assert_eq!(b, c);
@@ -338,8 +399,9 @@ mod tests {
 
   #[test]
   fn concrete_debug_transparency() {
-    let value: usize = 123;
-    let index: Concrete<()> = Concrete::new(value);
+    let value: usize = 7;
+    // SAFETY: 7 is below the minimum capacity of 16.
+    let index: Concrete<DefaultParams> = unsafe { Concrete::new(value) };
 
     assert_eq!(format!("{index:?}"), format!("{value:?}"));
   }
@@ -474,4 +536,91 @@ mod tests {
       }
     });
   }
+
+  #[test]
+  fn covers_rejects_masks_past_length() {
+    assert!(!AssertIndexMasks::<DefaultParams>::covers(0, 31, 16));
+    assert!(AssertIndexMasks::<DefaultParams>::covers(0, 15, 16));
+    assert!(AssertIndexMasks::<DefaultParams>::covers(1, 7, 16));
+    assert!(!AssertIndexMasks::<DefaultParams>::covers(
+      usize::MAX,
+      0,
+      16
+    ));
+  }
+}
+
+// -----------------------------------------------------------------------------
+// Kani Proofs
+// -----------------------------------------------------------------------------
+
+#[cfg(kani)]
+mod proofs {
+  use super::*;
+  use crate::params::ConstParams;
+  use crate::params::kani_each_capacity;
+
+  // Checks the index mapping of `P`.
+  fn check_mapping<P>()
+  where
+    P: Params,
+  {
+    let length: usize = P::LENGTH.as_usize();
+
+    assert!(AssertIndexMasks::<P>::covers(
+      P::ID_MASK_BLOCK,
+      P::ID_MASK_INDEX,
+      length
+    ));
+
+    // Injective on `0..LENGTH`.
+    let a: usize = kani::any();
+    let b: usize = kani::any();
+    kani::assume(a < length);
+    kani::assume(b < length);
+
+    let ca: usize = abstract_to_concrete::<P>(Abstract::new(a)).get();
+    let cb: usize = abstract_to_concrete::<P>(Abstract::new(b)).get();
+
+    if ca == cb {
+      assert!(a == b);
+    }
+
+    // Surjective on `0..LENGTH`: `c` has a preimage in range, and that preimage
+    // maps back to `c`.
+    let c: usize = kani::any();
+    kani::assume(c < length);
+
+    let preimage: usize = (c >> P::ID_SHIFT_BLOCK) | ((c & P::ID_MASK_INDEX) << P::ID_SHIFT_INDEX);
+    assert!(preimage < length);
+    assert!(abstract_to_concrete::<P>(Abstract::new(preimage)).get() == c);
+
+    // Round trip for every sequential index.
+    let d: usize = kani::any();
+    let detached: Detached = abstract_to_detached::<P>(Abstract::new(d));
+    assert!(detached_to_abstract::<P>(detached).get() == d);
+
+    // Every detached index, whatever its bits, lands in bounds and agrees with
+    // the sequential index it decodes to.
+    let bits: usize = kani::any();
+    let index: Detached = Detached::from_bits(bits);
+    let concrete: usize = detached_to_concrete::<P>(index).get();
+
+    assert!(concrete < length);
+    assert!(abstract_to_concrete::<P>(detached_to_abstract::<P>(index)).get() == concrete);
+
+    let (number, _serial) = index.decompose::<P>();
+    assert!((number as usize) < length);
+  }
+
+  macro_rules! harness {
+    ($name:ident, $bits:literal) => {
+      #[kani::proof]
+      fn $name() {
+        check_mapping::<ConstParams<{ 1 << $bits }>>();
+      }
+    };
+  }
+
+  kani_each_capacity!(harness);
 }

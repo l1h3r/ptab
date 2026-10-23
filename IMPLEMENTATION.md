@@ -65,7 +65,7 @@ The conversions use masks and shifts that `ParamsExt` derives from `Params::LENG
 
 - `ID_MASK_ENTRY` is `LENGTH - 1`. It selects the entry bits of an index.
 - `ID_MASK_BLOCK` is the block count minus one, and `ID_SHIFT_INDEX` is the number of bits in it.
-- `ID_MASK_INDEX` is the slots per cache line minus one, and `ID_SHIFT_BLOCK` is the number of bits in it.
+- `ID_MASK_INDEX` is the slots each block holds minus one, `(LENGTH >> ID_SHIFT_INDEX) - 1`, and `ID_SHIFT_BLOCK` is the number of bits in it. It is the slots per cache line minus one unless the table is smaller than one cache line.
 
 A block is one cache line of slots. Lookup and removal take the `Concrete` index from a `Detached` index by masking with `ID_MASK_ENTRY`. They ignore the serial.
 

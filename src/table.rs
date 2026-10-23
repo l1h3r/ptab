@@ -129,7 +129,10 @@ where
   }
 
   #[inline]
-  pub(crate) fn remove(&self, key: Detached) -> bool {
+  pub(crate) fn remove(&self, key: Detached) -> bool
+  where
+    T: Send, // The collector may drop the entry on another thread
+  {
     let index: Concrete<P> = Concrete::from_detached(key);
     let entry: &Atomic<T, P> = self.readonly.data.get(index);
 
@@ -144,7 +147,7 @@ where
   #[inline]
   pub(crate) fn with<F, R>(&self, key: Detached, guard: &Guard<P>, f: F) -> Option<R>
   where
-    F: Fn(&T) -> R,
+    F: FnOnce(&T) -> R,
   {
     self.find(key, guard).as_ref().map(f)
   }
@@ -188,6 +191,7 @@ where
     // Table is full; undo the increment.
     let mut current: u32 = prev.wrapping_add(1);
 
+    // Retries the compare-exchange until it undoes the increment.
     while let Err(next) = self.volatile.swap_entries(current, current.wrapping_sub(1)) {
       current = next;
     }
@@ -202,6 +206,9 @@ where
       let concrete_idx: Concrete<P> = Concrete::from_abstract(abstract_idx);
 
       let atomic: &AtomicUsize = self.readonly.slot.get(concrete_idx);
+      // Relaxed: the ring carries only indices. Slot ownership passes through the
+      // data slot: the previous owner's `evict(AcqRel)` in `remove`, then
+      // this owner's `write(Release)` on the same slot.
       let result: usize = atomic.swap(RESERVED, Relaxed);
 
       if result == RESERVED {
@@ -216,6 +223,9 @@ where
   fn release_slot(&self, index: Abstract<P>) {
     let data: usize = self.generate_next_slot(index);
 
+    // Relaxed: publishes only the index. The slot is free after `remove`'s
+    // `evict(AcqRel)`; the next owner's `write(Release)` targets the same data
+    // slot (a swap in sdd, a store in leak).
     while self
       .readonly
       .slot
@@ -247,25 +257,64 @@ where
 {
   #[inline]
   fn drop(&mut self) {
-    let mut count: u32 = self.len();
+    let count: u32 = self.len();
 
     if count == 0 {
       return;
     }
 
-    for entry in self.readonly.data.as_mut_slice() {
+    // If a destructor panics, the guard's `Drop` finishes the walk, so the
+    // remaining entries are still dropped, as `Vec` does.
+    let mut teardown: Teardown<'_, T, P> = Teardown {
+      entries: self.readonly.data.as_mut_slice().iter_mut(),
+      count,
+    };
+
+    teardown.clear_all();
+  }
+}
+
+/// Drops the live entries of a [`Table`] being dropped.
+///
+/// Its `Drop` runs `clear_all` again, so a panicking entry destructor does not
+/// leak the entries after it.
+struct Teardown<'a, T, P>
+where
+  P: Params + ?Sized,
+{
+  entries: core::slice::IterMut<'a, Atomic<T, P>>,
+  count: u32,
+}
+
+impl<T, P> Teardown<'_, T, P>
+where
+  P: Params + ?Sized,
+{
+  fn clear_all(&mut self) {
+    while self.count != 0 {
+      let Some(entry) = self.entries.next() else {
+        break;
+      };
+
       // SAFETY:
       // - `Drop` provides exclusive access via `&mut self`, so no concurrent
       //   access can occur.
-      // - Each slot is dropped at most once.
+      // - Each slot is dropped at most once: the iterator has already advanced
+      //   past an entry whose destructor panicked.
       if unsafe { entry.clear() } {
-        count = count.wrapping_sub(1);
-
-        if count == 0 {
-          break;
-        }
+        self.count = self.count.wrapping_sub(1);
       }
     }
+  }
+}
+
+impl<T, P> Drop for Teardown<'_, T, P>
+where
+  P: Params + ?Sized,
+{
+  #[inline]
+  fn drop(&mut self) {
+    self.clear_all();
   }
 }
 
@@ -276,6 +325,9 @@ where
 // SAFETY:
 // - `Table` may transfer ownership of entries across threads.
 // - This is only sound if `T: Send`.
+// - The collector's `Atomic` contract (`# Safety` in `reclaim::traits`) makes
+//   the bound on `T` alone sufficient: its `Atomic` impl is sound to move and
+//   drop on another thread when `T: Send`, whatever auto traits it has.
 // - `P` is only a type-level configuration: `Table` never stores a value of type `P`,
 //   only `PhantomData` markers, so it needs no bound.
 unsafe impl<T, P> Send for Table<T, P>
@@ -289,9 +341,12 @@ where
 // - `Sync` covers shared `&T` handed out by `with` and `read`: several threads may
 //   hold references to one entry at once, which needs `T: Sync`.
 // - `Send` covers values moved in by `insert` and `write` on one thread and dropped
-//   by `remove` or `Drop` on another, possibly later once reclaimed, which needs
-//   `T: Send`.
+//   by `Drop` on another, which needs `T: Send`. `remove` carries its own `T: Send`
+//   bound, since the collector may drop the entry on any thread.
 // - Both bounds are therefore required. `P` needs no bound, as for `Send`.
+// - The collector's `Atomic` contract (`# Safety` in `reclaim::traits`) covers
+//   the `&self` methods for `T: Send + Sync`, so these bounds on `T` alone are
+//   sufficient.
 unsafe impl<T, P> Sync for Table<T, P>
 where
   T: Send + Sync,
@@ -299,12 +354,26 @@ where
 {
 }
 
-// Unconditional: `with` and `read` only give shared access to `T`, and a panic
-// in `with`'s closure or in `write`'s `init` leaves the table consistent (a
-// panicking `init` leaks its slot, see `PTab::write`). Reclamation is the
-// collector's concern and is unaffected by unwinding.
-impl<T, P> RefUnwindSafe for Table<T, P> where P: Params + ?Sized {}
-impl<T, P> UnwindSafe for Table<T, P> where P: Params + ?Sized {}
+// Unwind safety follows `T`, not the table. `with` and `read` hand out `&T`, so
+// a panic can leave a `T` with interior mutability half-updated for the next
+// observer: `Table<T, P>` is `RefUnwindSafe` and `UnwindSafe` only when
+// `T: RefUnwindSafe`, as for `Arc<T>`. The table's own state stays consistent
+// across a panic (a panicking `init` leaks its slot, see `PTab::write`), and
+// reclamation is unaffected by unwinding, so `P` needs no bound. The auto impls
+// would hold for every `T`, so these are explicit.
+impl<T, P> RefUnwindSafe for Table<T, P>
+where
+  T: RefUnwindSafe,
+  P: Params + ?Sized,
+{
+}
+
+impl<T, P> UnwindSafe for Table<T, P>
+where
+  T: RefUnwindSafe,
+  P: Params + ?Sized,
+{
+}
 
 impl<T, P> Debug for Table<T, P>
 where
@@ -364,16 +433,19 @@ where
     self.entries.load(Relaxed)
   }
 
+  // Atomically increments the count, returning the previous value.
   #[inline]
   fn incr_entries(&self) -> u32 {
     self.entries.fetch_add(1, Acquire)
   }
 
+  // Atomically decrements the count, returning the previous value.
   #[inline]
   fn decr_entries(&self) -> u32 {
     self.entries.fetch_sub(1, Release)
   }
 
+  // Compare-exchanges the count from `current` to `updated`.
   #[inline]
   fn swap_entries(&self, current: u32, updated: u32) -> Result<u32, u32> {
     self
@@ -381,11 +453,15 @@ where
       .compare_exchange_weak(current, updated, Release, Relaxed)
   }
 
+  // Relaxed: only hands out a ring position. The slot's ownership is ordered by
+  // `evict(AcqRel)` in `remove` and `write(Release)` on the data slot, not here.
   #[inline]
   fn fetch_next_id(&self) -> Abstract<P> {
     Abstract::new(self.next_id.fetch_add(1, Relaxed) as usize)
   }
 
+  // Relaxed: only hands out a ring position, like `fetch_next_id`. The slot is
+  // already free by `remove`'s `evict(AcqRel)`.
   #[inline]
   fn fetch_free_id(&self) -> Abstract<P> {
     Abstract::new(self.free_id.fetch_add(1, Relaxed) as usize)
@@ -595,13 +671,25 @@ where
   clippy::std_instead_of_alloc,
   reason = "tests run with `std` and the `alloc` crate is not declared"
 )]
+#[cfg_attr(
+  not(feature = "sdd"),
+  allow(
+    clippy::let_unit_value,
+    clippy::unit_arg,
+    reason = "the leaking collector's guard is `()`"
+  )
+)]
 mod tests {
+  use core::fmt::Result as FmtResult;
+  use core::fmt::Write;
+  #[cfg(feature = "sdd")]
   use core::time::Duration;
   use std::collections::HashSet;
   use std::sync::Arc;
   use std::sync::Barrier;
   use std::thread;
   use std::thread::JoinHandle;
+  #[cfg(feature = "sdd")]
   use std::time::Instant;
 
   use crate::index::Abstract;
@@ -613,10 +701,14 @@ mod tests {
   use crate::params::Params as _;
   use crate::params::ParamsExt as _;
   use crate::reclaim::Atomic as _;
+  #[cfg(feature = "sdd")]
+  use crate::reclaim::Shared as _;
   use crate::sync::atomic::AtomicUsize;
   use crate::sync::atomic::Ordering;
   use crate::table;
+  #[cfg(feature = "sdd")]
   use crate::table::Atomic;
+  #[cfg(feature = "sdd")]
   use crate::table::DataArray;
   use crate::table::Guard;
   use crate::table::Permit;
@@ -664,11 +756,57 @@ mod tests {
     };
   }
 
+  // Collects the values of a `{key: value, ..}` map as `Debug` writes it, with
+  // no intermediate string. Keys are skipped: `Debug` rebuilds generation 0
+  // keys after slot reuse.
+  struct DebugValues {
+    values: Vec<usize>,
+    value: Option<usize>,
+  }
+
+  impl Write for DebugValues {
+    fn write_str(&mut self, s: &str) -> FmtResult {
+      for byte in s.bytes() {
+        match byte {
+          b':' => self.value = Some(0),
+          b'0'..=b'9' => {
+            if let Some(value) = self.value.as_mut() {
+              *value = *value * 10 + usize::from(byte - b'0');
+            }
+          }
+          b',' | b'}' => {
+            if let Some(value) = self.value.take() {
+              self.values.push(value);
+            }
+          }
+          _ => {
+            // do nothing
+          }
+        }
+      }
+
+      Ok(())
+    }
+  }
+
+  fn debug_values(table: &Table<usize, MinParams>) -> Vec<usize> {
+    let mut debug: DebugValues = DebugValues {
+      values: Vec::with_capacity(table.cap()),
+      value: None,
+    };
+
+    write!(debug, "{table:?}").unwrap();
+
+    debug.values.sort_unstable();
+    debug.values
+  }
+
   // ---------------------------------------------------------------------------
   // Internals
   // ---------------------------------------------------------------------------
 
   #[test]
+  #[cfg(feature = "sdd")]
   fn new_data_array() {
     let array: DataArray<u64, DefParams> = ReadOnly::new_data_array();
     let slice: &[Atomic<u64, DefParams>] = array.as_slice();
@@ -677,6 +815,26 @@ mod tests {
     for atomic in slice {
       assert!(atomic.read(Ordering::Relaxed, &guard).is_null());
     }
+  }
+
+  // Scenario: The data array is allocated in `usize` slots.
+  // Expected: Each collector's `Atomic<T>` matches `usize` for any `T`.
+  #[test]
+  fn collector_atomic_matches_usize() {
+    use crate::reclaim::CollectorWeak;
+    use crate::reclaim::collector::Leak;
+
+    fn check<C: CollectorWeak>() {
+      assert_eq!(size_of::<C::Atomic<u64>>(), size_of::<usize>());
+      assert_eq!(align_of::<C::Atomic<u64>>(), align_of::<usize>());
+      assert_eq!(size_of::<C::Atomic<[u8; 64]>>(), size_of::<usize>());
+      assert_eq!(align_of::<C::Atomic<[u8; 64]>>(), align_of::<usize>());
+    }
+
+    check::<Leak>();
+
+    #[cfg(feature = "sdd")]
+    check::<crate::reclaim::collector::Sdd>();
   }
 
   #[test]
@@ -829,10 +987,12 @@ mod tests {
   // - Every `Permit` is honored in `acquire_slot`.
   // - All keys are unique.
   // - The table count stays in bounds.
+  // - Released slots are reused, and the count matches acquires minus releases.
   #[test]
   fn slot_churn() {
     static PERMITS: AtomicUsize = AtomicUsize::new(0);
     static UNIQUES: AtomicUsize = AtomicUsize::new(0);
+    static RELEASES: AtomicUsize = AtomicUsize::new(0);
 
     let table: Arc<Table<usize, DefParams>> = Arc::new(Table::new());
     let barrier: Arc<Barrier> = Arc::new(Barrier::new(THREADS + 1));
@@ -846,8 +1006,8 @@ mod tests {
       let table: Arc<Table<usize, DefParams>> = Arc::clone(&table);
 
       threads.push(thread::spawn(move || {
-        let mut track: Vec<usize> = Vec::with_capacity(capacity);
-        let mut index: usize = 0;
+        let mut track: Vec<usize> = Vec::with_capacity(capacity * 4);
+        let mut released: usize = 0;
 
         barrier.wait();
 
@@ -855,19 +1015,22 @@ mod tests {
           for _ in 0..capacity {
             if let Some(permit) = table.reserve_slot() {
               track.push(table.acquire_slot(permit).get());
-              index += 1;
 
               assert!(table.len() <= capacity as u32);
-              assert!(PERMITS.fetch_add(1, Ordering::Relaxed) <= capacity);
+              assert!(PERMITS.fetch_add(1, Ordering::Relaxed) < capacity);
 
               UNIQUES.fetch_add(1, Ordering::Relaxed);
             }
 
-            if index.is_multiple_of(2)
-              && let Some(index) = track[index..].first()
+            // Release the oldest slot this thread still holds, so slots are reused.
+            if track.len().is_multiple_of(2)
+              && let Some(key) = track.get(released)
             {
-              table.release_slot(Abstract::new(*index));
               PERMITS.fetch_sub(1, Ordering::Relaxed);
+              table.release_slot(Abstract::new(*key));
+              released += 1;
+
+              RELEASES.fetch_add(1, Ordering::Relaxed);
             }
 
             thread::yield_now();
@@ -887,7 +1050,12 @@ mod tests {
     }
 
     assert_eq!(uniques.len(), UNIQUES.load(Ordering::Relaxed));
-    assert_eq!(table.cap(), PERMITS.load(Ordering::Relaxed));
+    assert_ne!(RELEASES.load(Ordering::Relaxed), 0);
+    assert_eq!(
+      table.len() as usize,
+      UNIQUES.load(Ordering::Relaxed) - RELEASES.load(Ordering::Relaxed),
+    );
+    assert_eq!(table.len() as usize, PERMITS.load(Ordering::Relaxed));
   }
 
   // ---------------------------------------------------------------------------
@@ -997,6 +1165,10 @@ mod tests {
   }
 
   #[test]
+  #[cfg_attr(
+    all(miri, not(feature = "sdd")),
+    ignore = "Leak never frees evicted entries, so Miri's leak check fails"
+  )]
   fn remove() {
     let table: Table<usize, DefParams> = Table::new();
     let index: Detached = table.insert(123).unwrap();
@@ -1011,6 +1183,10 @@ mod tests {
   }
 
   #[test]
+  #[cfg_attr(
+    all(miri, not(feature = "sdd")),
+    ignore = "Leak never frees evicted entries, so Miri's leak check fails"
+  )]
   fn remove_nonexistent() {
     let table: Table<usize, DefParams> = Table::new();
     let index: Detached = table.insert(123).unwrap();
@@ -1020,6 +1196,10 @@ mod tests {
   }
 
   #[test]
+  #[cfg_attr(
+    all(miri, not(feature = "sdd")),
+    ignore = "Leak never frees evicted entries, so Miri's leak check fails"
+  )]
   fn remove_recycling() {
     let table: Table<usize, DefParams> = Table::new();
     let guard: Guard<DefParams> = DefParams::guard();
@@ -1144,7 +1324,6 @@ mod tests {
 
   // Scenario: A full `Capacity::MAX` table has one remove and one reinsert.
   // Expected: `weak_keys` yields exactly `len` keys.
-  #[cfg(feature = "slow")]
   #[test]
   fn weak_keys_full_max() {
     let table: Table<(), MaxParams> = Table::new();
@@ -1173,6 +1352,7 @@ mod tests {
   }
 
   #[test]
+  #[cfg(feature = "sdd")]
   fn drop_half_full() {
     make_drop!(DropMe);
 
@@ -1225,6 +1405,48 @@ mod tests {
   }
 
   #[test]
+  fn drop_unwind_leak() {
+    struct LeakParams;
+
+    impl crate::params::Params for LeakParams {
+      type Collector = crate::reclaim::collector::Leak;
+
+      const LENGTH: Capacity = Capacity::DEF;
+    }
+
+    static DROPS: [core::sync::atomic::AtomicU32; 4] =
+      [const { core::sync::atomic::AtomicU32::new(0) }; 4];
+
+    struct Unwinding(usize);
+
+    impl Drop for Unwinding {
+      fn drop(&mut self) {
+        DROPS[self.0].fetch_add(1, Ordering::Relaxed);
+
+        assert_ne!(self.0, 2, "destructor panic");
+      }
+    }
+
+    let table: Table<Unwinding, LeakParams> = Table::new();
+
+    for index in 0..4 {
+      assert_ne!(table.insert(Unwinding(index)), None);
+    }
+
+    let result = std::panic::catch_unwind(core::panic::AssertUnwindSafe(move || drop(table)));
+
+    assert!(result.is_err());
+
+    for (index, count) in DROPS.iter().enumerate() {
+      assert_eq!(
+        count.load(Ordering::Relaxed),
+        1,
+        "entry {index} must be dropped exactly once"
+      );
+    }
+  }
+
+  #[test]
   fn debug_empty() {
     let table: Table<u64, DefParams> = Table::new();
     let value: String = format!("{table:?}");
@@ -1256,9 +1478,120 @@ mod tests {
     assert_eq!(debug, "WeakKeys(..)");
   }
 
+  // Scenario: Slots are removed and filled again, several times over.
+  // Expected: `len`, `weak_keys` and `Debug` agree on the live entries, and the
+  // key `insert` returned reads back its value.
+  #[test]
+  #[cfg_attr(
+    all(miri, not(feature = "sdd")),
+    ignore = "Leak never frees evicted entries, so Miri's leak check fails"
+  )]
+  fn slot_reuse_len_weak_keys_debug() {
+    let table: Table<usize, MinParams> = Table::new();
+    let guard: Guard<MinParams> = MinParams::guard();
+    let cap: usize = table.cap();
+
+    let mut live: Vec<(Detached, usize)> = Vec::with_capacity(cap);
+    let mut next: usize = 0;
+
+    for _ in 0..cap {
+      live.push((table.insert(next).unwrap(), next));
+      next += 1;
+    }
+
+    for round in 0..3 {
+      for _ in 0..2 {
+        let (key, _) = live.remove(round);
+
+        assert!(table.remove(key));
+      }
+
+      assert_eq!(table.len() as usize, cap - 2);
+      assert_eq!(table.weak_keys(MinParams::guard()).count(), cap - 2);
+      assert_eq!(debug_values(&table).len(), cap - 2);
+
+      for _ in 0..2 {
+        live.push((table.insert(next).unwrap(), next));
+        next += 1;
+      }
+
+      let mut expected: Vec<usize> = live.iter().map(|(_, value)| *value).collect();
+
+      expected.sort_unstable();
+
+      assert_eq!(table.len() as usize, cap);
+      assert_eq!(table.weak_keys(MinParams::guard()).count(), cap);
+      assert_eq!(debug_values(&table), expected);
+
+      for (key, value) in &live {
+        assert_eq!(table.read(*key, &guard), Some(*value));
+      }
+    }
+  }
+
+  // Scenario: A full table has one entry removed and nothing inserted after.
+  // Expected: `len`, `weak_keys` and `Debug` all report one fewer entry.
+  #[test]
+  #[cfg_attr(
+    all(miri, not(feature = "sdd")),
+    ignore = "Leak never frees evicted entries, so Miri's leak check fails"
+  )]
+  fn slot_reuse_partial() {
+    let table: Table<usize, MinParams> = Table::new();
+    let cap: usize = table.cap();
+
+    let mut keys: Vec<Detached> = Vec::with_capacity(cap);
+
+    for index in 0..cap {
+      keys.push(table.insert(index).unwrap());
+    }
+
+    assert!(table.remove(keys[0]));
+
+    let mut expected: Vec<usize> = (1..cap).collect();
+
+    expected.sort_unstable();
+
+    assert_eq!(table.len() as usize, cap - 1);
+    assert_eq!(table.weak_keys(MinParams::guard()).count(), cap - 1);
+    assert_eq!(debug_values(&table), expected);
+  }
+
+  // Scenario: A table is filled, emptied and filled again.
+  // Expected: Once emptied, `Debug` is `{}` and `weak_keys` yields nothing.
+  #[test]
+  #[cfg_attr(
+    all(miri, not(feature = "sdd")),
+    ignore = "Leak never frees evicted entries, so Miri's leak check fails"
+  )]
+  fn slot_reuse_remove_all() {
+    let table: Table<usize, MinParams> = Table::new();
+    let cap: usize = table.cap();
+
+    for _ in 0..2 {
+      let mut keys: Vec<Detached> = Vec::with_capacity(cap);
+
+      for index in 0..cap {
+        keys.push(table.insert(index).unwrap());
+      }
+
+      for key in keys {
+        assert!(table.remove(key));
+      }
+
+      assert_eq!(table.len(), 0);
+      assert_eq!(table.weak_keys(MinParams::guard()).next(), None);
+      assert_eq!(format!("{table:?}"), "{}");
+    }
+  }
+
   // Scenario: The table has a single block due to min capacity.
   // Expected: Entry operations succeed.
   #[test]
+  #[cfg_attr(
+    all(miri, not(feature = "sdd")),
+    ignore = "Leak never frees evicted entries, so Miri's leak check fails"
+  )]
   fn min_capacity_ops() {
     let table: Table<usize, MinParams> = Table::new();
     let guard: Guard<MinParams> = MinParams::guard();

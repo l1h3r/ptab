@@ -48,7 +48,7 @@ pub use crate::table::WeakKeys;
 ///
 /// Sharing the table across threads moves values between them, so `PTab` is
 /// `Sync` only when `T` is both `Send` and `Sync`. A `MutexGuard` is `Sync` but
-/// not `Send`, so it can't be removed from another thread:
+/// not `Send`, so the table can't be shared with another thread:
 ///
 /// ```compile_fail,E0277
 /// use std::sync::Mutex;
@@ -65,7 +65,7 @@ pub use crate::table::WeakKeys;
 ///
 /// thread::scope(|s| {
 ///   s.spawn(|| {
-///     table.remove(idx);
+///     table.exists(idx);
 ///   });
 /// });
 /// ```
@@ -242,9 +242,14 @@ where
   /// Only the slot bits of `index` are used, so an index kept after its entry
   /// was removed removes the entry that now occupies that slot.
   ///
+  /// Requires `T: Send`: the collector may drop the removed entry on whichever
+  /// thread later reclaims it.
+  ///
   /// # Examples
   ///
   /// ```
+  /// # #[cfg(feature = "sdd")]
+  /// # fn main() {
   /// use ptab::PTab;
   ///
   /// let table: PTab<i32> = PTab::new();
@@ -252,10 +257,14 @@ where
   ///
   /// assert!(table.remove(idx));  // Entry removed
   /// assert!(!table.remove(idx)); // Already gone
+  /// # }
+  /// # #[cfg(not(feature = "sdd"))]
+  /// # fn main() {}
   /// ```
   #[inline]
   pub fn remove(&self, index: Detached) -> bool
   where
+    T: Send,                 // The collector may drop the entry on another thread
     P::Collector: Collector, // Removed entries must eventually be reclaimed
   {
     self.inner.remove(index)
@@ -268,6 +277,8 @@ where
   /// # Examples
   ///
   /// ```
+  /// # #[cfg(feature = "sdd")]
+  /// # fn main() {
   /// use ptab::PTab;
   ///
   /// let table: PTab<i32> = PTab::new();
@@ -276,6 +287,9 @@ where
   /// assert!(table.exists(idx));
   /// table.remove(idx);
   /// assert!(!table.exists(idx));
+  /// # }
+  /// # #[cfg(not(feature = "sdd"))]
+  /// # fn main() {}
   /// ```
   #[inline]
   pub fn exists(&self, index: Detached) -> bool {
@@ -300,10 +314,26 @@ where
   /// let len = table.with(idx, |s| s.len());
   /// assert_eq!(len, Some(5));
   /// ```
+  ///
+  /// The closure is called at most once, so it may consume captured values:
+  ///
+  /// ```
+  /// use ptab::PTab;
+  ///
+  /// let table: PTab<String> = PTab::new();
+  /// let idx = table.insert("hello".to_string()).unwrap();
+  ///
+  /// let owned = String::from("x");
+  /// let n = table.with(idx, move |s| {
+  ///   let o = owned;
+  ///   o.len() + s.len()
+  /// });
+  /// assert_eq!(n, Some(6));
+  /// ```
   #[inline]
   pub fn with<F, R>(&self, index: Detached, f: F) -> Option<R>
   where
-    F: Fn(&T) -> R,
+    F: FnOnce(&T) -> R,
   {
     self.inner.with(index, &P::guard(), f)
   }
@@ -359,6 +389,9 @@ where
   }
 }
 
+/// Lists each present entry under the index of its slot with serial 0, as
+/// [`WeakKeys`] yields it. Once a slot has been reused, that index differs from
+/// the one `insert` returned.
 impl<T, P> Debug for PTab<T, P>
 where
   T: Debug,
@@ -380,6 +413,239 @@ where
   fn default() -> Self {
     Self::new()
   }
+}
+
+#[cfg(doctest)]
+mod send_sync {
+  /// `Rc<u8>` is neither `Send` nor `Sync`, so `PTab` is not `Send`.
+  ///
+  /// ```compile_fail,E0277
+  /// use std::rc::Rc;
+  /// use ptab::PTab;
+  ///
+  /// fn assert_send<T: Send>() {}
+  ///
+  /// assert_send::<PTab<Rc<u8>>>();
+  /// ```
+  ///
+  /// ```
+  /// use ptab::PTab;
+  ///
+  /// fn assert_send<T: Send>() {}
+  ///
+  /// assert_send::<PTab<u8>>();
+  /// ```
+  const NOT_SEND_RC: () = ();
+
+  /// `Rc<u8>` is neither `Send` nor `Sync`, so `PTab` is not `Sync`.
+  ///
+  /// ```compile_fail,E0277
+  /// use std::rc::Rc;
+  /// use ptab::PTab;
+  ///
+  /// fn assert_sync<T: Sync>() {}
+  ///
+  /// assert_sync::<PTab<Rc<u8>>>();
+  /// ```
+  ///
+  /// ```
+  /// use ptab::PTab;
+  ///
+  /// fn assert_sync<T: Sync>() {}
+  ///
+  /// assert_sync::<PTab<u8>>();
+  /// ```
+  const NOT_SYNC_RC: () = ();
+
+  /// `Cell<u8>` is `Send` but not `Sync`. `PTab` requires `T: Send` to be
+  /// `Send`, so it is `Send`, and it is not `Sync` because `Sync` needs
+  /// `T: Sync` as well.
+  ///
+  /// ```
+  /// use std::cell::Cell;
+  /// use ptab::PTab;
+  ///
+  /// fn assert_send<T: Send>() {}
+  ///
+  /// assert_send::<PTab<Cell<u8>>>();
+  /// ```
+  ///
+  /// ```compile_fail,E0277
+  /// use std::cell::Cell;
+  /// use ptab::PTab;
+  ///
+  /// fn assert_sync<T: Sync>() {}
+  ///
+  /// assert_sync::<PTab<Cell<u8>>>();
+  /// ```
+  ///
+  /// ```
+  /// use ptab::PTab;
+  ///
+  /// fn assert_sync<T: Sync>() {}
+  ///
+  /// assert_sync::<PTab<u8>>();
+  /// ```
+  const SEND_NOT_SYNC_CELL: () = ();
+
+  /// `MutexGuard` is `Sync` but not `Send`, so `PTab` is neither.
+  ///
+  /// ```compile_fail,E0277
+  /// use std::sync::MutexGuard;
+  /// use ptab::PTab;
+  ///
+  /// fn assert_send<T: Send>() {}
+  ///
+  /// assert_send::<PTab<MutexGuard<'static, u8>>>();
+  /// ```
+  ///
+  /// ```
+  /// use ptab::PTab;
+  ///
+  /// fn assert_send<T: Send>() {}
+  ///
+  /// assert_send::<PTab<u8>>();
+  /// ```
+  ///
+  /// ```compile_fail,E0277
+  /// use std::sync::MutexGuard;
+  /// use ptab::PTab;
+  ///
+  /// fn assert_sync<T: Sync>() {}
+  ///
+  /// assert_sync::<PTab<MutexGuard<'static, u8>>>();
+  /// ```
+  ///
+  /// ```
+  /// use std::sync::MutexGuard;
+  ///
+  /// fn assert_sync<T: Sync>() {}
+  ///
+  /// assert_sync::<MutexGuard<'static, u8>>();
+  /// ```
+  const NOT_SEND_GUARD: () = ();
+
+  /// Types that are `Send` and `Sync` make `PTab` both.
+  ///
+  /// ```
+  /// use std::sync::Mutex;
+  /// use ptab::PTab;
+  ///
+  /// fn assert_send_sync<T: Send + Sync>() {}
+  ///
+  /// assert_send_sync::<PTab<u64>>();
+  /// assert_send_sync::<PTab<String>>();
+  /// assert_send_sync::<PTab<Mutex<u8>>>();
+  /// ```
+  const SEND_SYNC: () = ();
+
+  /// `remove` needs `T: Send`, because the collector may drop the entry on
+  /// another thread. Needs `sdd`: `Leak` has no `Collector`, so without it the
+  /// twin would not compile either.
+  ///
+  /// ```compile_fail,E0277
+  /// use std::sync::{Mutex, MutexGuard};
+  /// use ptab::PTab;
+  ///
+  /// static M: Mutex<u8> = Mutex::new(0);
+  ///
+  /// let table: PTab<MutexGuard<'static, u8>> = PTab::new();
+  /// let idx = table.insert(M.lock().unwrap()).unwrap();
+  /// table.remove(idx);
+  /// ```
+  ///
+  /// ```
+  /// use ptab::PTab;
+  ///
+  /// let table: PTab<u8> = PTab::new();
+  /// let idx = table.insert(0).unwrap();
+  /// table.remove(idx);
+  /// ```
+  #[cfg(feature = "sdd")]
+  const REMOVE_NEEDS_SEND: () = ();
+}
+
+#[cfg(doctest)]
+mod unwind_safe {
+  /// `RefCell<u32>` is not `RefUnwindSafe`, so `PTab` is not `RefUnwindSafe`.
+  ///
+  /// ```compile_fail,E0277
+  /// use std::cell::RefCell;
+  /// use ptab::{DefaultParams, PTab, WeakKeys};
+  ///
+  /// fn assert_ref_unwind_safe<T: std::panic::RefUnwindSafe>() {}
+  ///
+  /// assert_ref_unwind_safe::<PTab<RefCell<u32>>>();
+  /// ```
+  ///
+  /// ```
+  /// use ptab::{DefaultParams, PTab, WeakKeys};
+  ///
+  /// fn assert_ref_unwind_safe<T: std::panic::RefUnwindSafe>() {}
+  ///
+  /// assert_ref_unwind_safe::<PTab<u32>>();
+  /// ```
+  const PTAB_REF_UNWIND_SAFE: () = ();
+
+  /// `RefCell<u32>` is not `RefUnwindSafe`, so `PTab` is not `UnwindSafe`.
+  ///
+  /// ```compile_fail,E0277
+  /// use std::cell::RefCell;
+  /// use ptab::{DefaultParams, PTab, WeakKeys};
+  ///
+  /// fn assert_unwind_safe<T: std::panic::UnwindSafe>() {}
+  ///
+  /// assert_unwind_safe::<PTab<RefCell<u32>>>();
+  /// ```
+  ///
+  /// ```
+  /// use ptab::{DefaultParams, PTab, WeakKeys};
+  ///
+  /// fn assert_unwind_safe<T: std::panic::UnwindSafe>() {}
+  ///
+  /// assert_unwind_safe::<PTab<u32>>();
+  /// ```
+  const PTAB_UNWIND_SAFE: () = ();
+
+  /// `RefCell<u32>` is not `RefUnwindSafe`, so `WeakKeys` is not `RefUnwindSafe`.
+  ///
+  /// ```compile_fail,E0277
+  /// use std::cell::RefCell;
+  /// use ptab::{DefaultParams, PTab, WeakKeys};
+  ///
+  /// fn assert_ref_unwind_safe<T: std::panic::RefUnwindSafe>() {}
+  ///
+  /// assert_ref_unwind_safe::<WeakKeys<'static, RefCell<u32>, DefaultParams>>();
+  /// ```
+  ///
+  /// ```
+  /// use ptab::{DefaultParams, PTab, WeakKeys};
+  ///
+  /// fn assert_ref_unwind_safe<T: std::panic::RefUnwindSafe>() {}
+  ///
+  /// assert_ref_unwind_safe::<WeakKeys<'static, u32, DefaultParams>>();
+  /// ```
+  const WEAK_KEYS_REF_UNWIND_SAFE: () = ();
+
+  /// `RefCell<u32>` is not `RefUnwindSafe`, so `WeakKeys` is not `UnwindSafe`.
+  ///
+  /// ```compile_fail,E0277
+  /// use std::cell::RefCell;
+  /// use ptab::{DefaultParams, PTab, WeakKeys};
+  ///
+  /// fn assert_unwind_safe<T: std::panic::UnwindSafe>() {}
+  ///
+  /// assert_unwind_safe::<WeakKeys<'static, RefCell<u32>, DefaultParams>>();
+  /// ```
+  ///
+  /// ```
+  /// use ptab::{DefaultParams, PTab, WeakKeys};
+  ///
+  /// fn assert_unwind_safe<T: std::panic::UnwindSafe>() {}
+  ///
+  /// assert_unwind_safe::<WeakKeys<'static, u32, DefaultParams>>();
+  /// ```
+  const WEAK_KEYS_UNWIND_SAFE: () = ();
 }
 
 #[cfg(test)]

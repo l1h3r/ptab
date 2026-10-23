@@ -96,8 +96,12 @@ pub trait ParamsExt: Params + Sealed {
   const ID_MASK_ENTRY: usize = 1_usize.strict_shl(Self::ID_MASK_BITS).strict_sub(1);
   /// The mask selecting the block bits of an index.
   const ID_MASK_BLOCK: usize = Self::BLOCKS.get().strict_sub(1);
-  /// The mask selecting the slot bits within a block.
-  const ID_MASK_INDEX: usize = CACHE_LINE_SLOTS.strict_sub(1);
+  /// The mask selecting the slot bits within a block. It is `CACHE_LINE_SLOTS - 1`
+  /// unless the table is smaller than one cache line.
+  const ID_MASK_INDEX: usize = Self::LENGTH
+    .as_usize()
+    .strict_shr(Self::ID_SHIFT_INDEX)
+    .strict_sub(1);
   /// The shift that places the block bits of an index.
   const ID_SHIFT_BLOCK: u32 = Self::ID_MASK_INDEX.trailing_ones();
   /// The shift that places the slot bits of an index.
@@ -175,6 +179,10 @@ where
 /// The default table configuration with [`Capacity::DEF`] slots.
 ///
 /// Used when a table does not name a [`Params`] type.
+///
+/// The collector depends on the `sdd` feature. With it, the collector is `Sdd`,
+/// which supports `remove` and needs `std`. Without it, the collector is
+/// [`collector::Leak`], which has no `remove`.
 ///
 /// # Examples
 ///
@@ -443,24 +451,33 @@ enum CapacityEnum {
 impl CapacityEnum {
   const MIN: Self = Self::Capacity1Shl4;
 
-  #[cfg(miri)]
+  #[cfg(ptab_miri)]
   const MAX: Self = Self::Capacity1Shl10;
 
-  #[cfg(all(not(miri), test, not(feature = "slow")))]
+  #[cfg(all(not(ptab_miri), test))]
   const MAX: Self = Self::Capacity1Shl16;
 
-  #[cfg(not(any(miri, all(test, not(feature = "slow")))))]
+  #[cfg(not(any(ptab_miri, test)))]
   const MAX: Self = Self::Capacity1Shl27;
 
-  #[cfg(miri)]
+  #[cfg(ptab_miri)]
   const DEF: Self = Self::Capacity1Shl5;
 
-  #[cfg(all(not(miri), test, not(feature = "slow")))]
+  #[cfg(all(not(ptab_miri), test))]
   const DEF: Self = Self::Capacity1Shl10;
 
-  #[cfg(not(any(miri, all(test, not(feature = "slow")))))]
+  #[cfg(not(any(ptab_miri, test)))]
   const DEF: Self = Self::Capacity1Shl20;
 }
+
+// Under Miri, ptab's own tests and doctests use the reduced sizes only with `--cfg ptab_miri`.
+// Without it they would build full-size tables. Cargo sets `CARGO_PRIMARY_PACKAGE` only for
+// packages selected by the user, so it is set when ptab's own tests and doctests build, and never
+// when ptab is a downstream dependency.
+#[cfg(all(miri, not(ptab_miri)))]
+const _: () = if option_env!("CARGO_PRIMARY_PACKAGE").is_some() {
+  panic!("under Miri, ptab's own tests need `RUSTFLAGS=\"--cfg ptab_miri\"`")
+};
 
 // -----------------------------------------------------------------------------
 // Misc. Utilities
@@ -646,7 +663,11 @@ mod tests {
       let expected: usize = P::LENGTH.as_usize();
       let received: usize = P::BLOCKS.get() * CACHE_LINE_SLOTS;
 
-      assert_eq!(expected, received);
+      assert!(received >= expected);
+
+      if expected >= CACHE_LINE_SLOTS {
+        assert_eq!(expected, received);
+      }
     });
   }
 
@@ -698,6 +719,17 @@ mod tests {
   }
 
   #[test]
+  fn id_mask_index_below_length() {
+    each_capacity!({
+      assert!(P::ID_MASK_INDEX < P::LENGTH.as_usize());
+      assert_eq!(
+        P::ID_MASK_INDEX + 1,
+        P::LENGTH.as_usize().min(CACHE_LINE_SLOTS),
+      );
+    });
+  }
+
+  #[test]
   fn id_shift_block_composition() {
     each_capacity!({
       assert_eq!(P::ID_SHIFT_BLOCK, P::ID_MASK_INDEX.count_ones());
@@ -710,4 +742,126 @@ mod tests {
       assert_eq!(P::ID_SHIFT_INDEX, P::ID_MASK_BLOCK.count_ones());
     });
   }
+
+  /// Maps `abstract_idx` as `abstract_to_concrete` does, for a table of
+  /// `length` slots on a target with `slots` slots per cache line.
+  fn map_for(length: usize, slots: usize, abstract_idx: usize) -> usize {
+    let mask_block: usize = (length / slots).max(1) - 1;
+    let shift_index: u32 = mask_block.trailing_ones();
+    let mask_index: usize = length.strict_shr(shift_index).strict_sub(1);
+    let shift_block: u32 = mask_index.trailing_ones();
+
+    ((abstract_idx & mask_block) << shift_block) + ((abstract_idx >> shift_index) & mask_index)
+  }
+
+  #[test]
+  fn id_mask_index_maps_into_length() {
+    for slots in [8, 16, 32, 64] {
+      for bits in 4..=12 {
+        let length: usize = 1 << bits;
+        let mut seen: Vec<bool> = vec![false; length];
+
+        for index in 0..length {
+          let concrete: usize = map_for(length, slots, index);
+          assert!(
+            concrete < length,
+            "slots {slots}, length {length}, index {index}"
+          );
+          assert!(
+            !seen[concrete],
+            "slots {slots}, length {length}, index {index}"
+          );
+          seen[concrete] = true;
+
+          for generation in 1..4 {
+            let serial: usize = generation * length + index;
+            assert_eq!(map_for(length, slots, serial), concrete);
+          }
+        }
+      }
+    }
+  }
+}
+
+// -----------------------------------------------------------------------------
+// Kani Proofs
+// -----------------------------------------------------------------------------
+
+// Calls `$harness!` once per capacity, from 2^4 to 2^27, so each module's proofs
+// cover every `Capacity` rather than a sample.
+#[cfg(kani)]
+macro_rules! kani_each_capacity {
+  ($harness:ident) => {
+    $harness!(cap04, 4);
+    $harness!(cap05, 5);
+    $harness!(cap06, 6);
+    $harness!(cap07, 7);
+    $harness!(cap08, 8);
+    $harness!(cap09, 9);
+    $harness!(cap10, 10);
+    $harness!(cap11, 11);
+    $harness!(cap12, 12);
+    $harness!(cap13, 13);
+    $harness!(cap14, 14);
+    $harness!(cap15, 15);
+    $harness!(cap16, 16);
+    $harness!(cap17, 17);
+    $harness!(cap18, 18);
+    $harness!(cap19, 19);
+    $harness!(cap20, 20);
+    $harness!(cap21, 21);
+    $harness!(cap22, 22);
+    $harness!(cap23, 23);
+    $harness!(cap24, 24);
+    $harness!(cap25, 25);
+    $harness!(cap26, 26);
+    $harness!(cap27, 27);
+  };
+}
+
+#[cfg(kani)]
+pub(crate) use kani_each_capacity;
+
+#[cfg(kani)]
+mod proofs {
+  use super::*;
+
+  // Checks the derived parameters of `P` against their definitions.
+  fn check_params<P>()
+  where
+    P: Params,
+  {
+    let length: usize = P::LENGTH.as_usize();
+
+    assert!(P::LENGTH.as_nonzero().get() == length);
+    assert!(1_usize << P::LENGTH.log2() == length);
+    assert!(P::ID_MASK_BITS == length.trailing_zeros());
+    assert!(P::ID_MASK_ENTRY == length - 1);
+    assert!(P::ID_MASK_BLOCK + 1 == P::BLOCKS.get());
+    assert!(P::ID_SHIFT_BLOCK == (P::ID_MASK_INDEX + 1).trailing_zeros());
+    assert!(P::ID_SHIFT_INDEX == (P::ID_MASK_BLOCK + 1).trailing_zeros());
+    assert!(P::ID_MASK_BITS == P::ID_SHIFT_BLOCK + P::ID_SHIFT_INDEX);
+    assert!(P::BLOCKS.get() * CACHE_LINE >= length * size_of::<AtomicUsize>());
+  }
+
+  #[kani::proof]
+  fn capacity_new_is_power_of_two_in_range() {
+    let value: usize = kani::any();
+    let capacity: usize = Capacity::new(value).as_usize();
+
+    assert!(capacity.is_power_of_two());
+    assert!(capacity >= Capacity::MIN.as_usize());
+    assert!(capacity <= Capacity::MAX.as_usize());
+  }
+
+  macro_rules! harness {
+    ($name:ident, $bits:literal) => {
+      #[kani::proof]
+      fn $name() {
+        check_params::<ConstParams<{ 1 << $bits }>>();
+      }
+    };
+  }
+
+  kani_each_capacity!(harness);
 }

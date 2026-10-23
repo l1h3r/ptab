@@ -9,45 +9,103 @@ use core::ops::DerefMut;
 ///
 /// [`CACHE_LINE`]: crate::params::CACHE_LINE
 /// [`crossbeam-utils`]: https://crates.io/crates/crossbeam-utils
+// `ptab_kani_cache_line` overrides the target's alignment so Kani can prove the
+// layout for every cache-line size on the host. Unset, the target attributes apply.
+#[cfg_attr(ptab_kani_cache_line = "16", repr(align(16)))]
+#[cfg_attr(ptab_kani_cache_line = "32", repr(align(32)))]
+#[cfg_attr(ptab_kani_cache_line = "64", repr(align(64)))]
+#[cfg_attr(ptab_kani_cache_line = "128", repr(align(128)))]
+#[cfg_attr(ptab_kani_cache_line = "256", repr(align(256)))]
 #[cfg_attr(
-  any(
-    target_arch = "x86_64",
-    target_arch = "aarch64",
-    target_arch = "arm64ec",
-    target_arch = "powerpc64",
+  all(
+    not(any(
+      ptab_kani_cache_line = "16",
+      ptab_kani_cache_line = "32",
+      ptab_kani_cache_line = "64",
+      ptab_kani_cache_line = "128",
+      ptab_kani_cache_line = "256",
+    )),
+    any(
+      target_arch = "x86_64",
+      target_arch = "aarch64",
+      target_arch = "arm64ec",
+      target_arch = "powerpc64",
+    ),
   ),
   repr(align(128))
 )]
 #[cfg_attr(
-  any(
-    target_arch = "arm",
-    target_arch = "mips",
-    target_arch = "mips32r6",
-    target_arch = "mips64",
-    target_arch = "mips64r6",
-    target_arch = "sparc",
-    target_arch = "hexagon",
+  all(
+    not(any(
+      ptab_kani_cache_line = "16",
+      ptab_kani_cache_line = "32",
+      ptab_kani_cache_line = "64",
+      ptab_kani_cache_line = "128",
+      ptab_kani_cache_line = "256",
+    )),
+    any(
+      target_arch = "arm",
+      target_arch = "mips",
+      target_arch = "mips32r6",
+      target_arch = "mips64",
+      target_arch = "mips64r6",
+      target_arch = "sparc",
+      target_arch = "hexagon",
+    ),
   ),
   repr(align(32))
 )]
-#[cfg_attr(target_arch = "m68k", repr(align(16)))]
-#[cfg_attr(target_arch = "s390x", repr(align(256)))]
 #[cfg_attr(
-  not(any(
-    target_arch = "x86_64",
-    target_arch = "aarch64",
-    target_arch = "arm64ec",
-    target_arch = "powerpc64",
-    target_arch = "arm",
-    target_arch = "mips",
-    target_arch = "mips32r6",
-    target_arch = "mips64",
-    target_arch = "mips64r6",
-    target_arch = "sparc",
-    target_arch = "hexagon",
+  all(
+    not(any(
+      ptab_kani_cache_line = "16",
+      ptab_kani_cache_line = "32",
+      ptab_kani_cache_line = "64",
+      ptab_kani_cache_line = "128",
+      ptab_kani_cache_line = "256",
+    )),
     target_arch = "m68k",
+  ),
+  repr(align(16))
+)]
+#[cfg_attr(
+  all(
+    not(any(
+      ptab_kani_cache_line = "16",
+      ptab_kani_cache_line = "32",
+      ptab_kani_cache_line = "64",
+      ptab_kani_cache_line = "128",
+      ptab_kani_cache_line = "256",
+    )),
     target_arch = "s390x",
-  )),
+  ),
+  repr(align(256))
+)]
+#[cfg_attr(
+  all(
+    not(any(
+      ptab_kani_cache_line = "16",
+      ptab_kani_cache_line = "32",
+      ptab_kani_cache_line = "64",
+      ptab_kani_cache_line = "128",
+      ptab_kani_cache_line = "256",
+    )),
+    not(any(
+      target_arch = "x86_64",
+      target_arch = "aarch64",
+      target_arch = "arm64ec",
+      target_arch = "powerpc64",
+      target_arch = "arm",
+      target_arch = "mips",
+      target_arch = "mips32r6",
+      target_arch = "mips64",
+      target_arch = "mips64r6",
+      target_arch = "sparc",
+      target_arch = "hexagon",
+      target_arch = "m68k",
+      target_arch = "s390x",
+    )),
+  ),
   repr(align(64))
 )]
 pub(crate) struct CachePadded<T> {

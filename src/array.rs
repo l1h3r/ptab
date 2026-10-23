@@ -59,10 +59,17 @@ where
   /// Constructs a new array with uninitialized contents.
   #[inline]
   pub(crate) fn new_uninit() -> Array<MaybeUninit<T>, P> {
+    // `P::LAYOUT` is sized for `usize` slots, so `T` must match `usize`.
+    const {
+      assert!(
+        size_of::<T>() == size_of::<usize>() && align_of::<T>() == align_of::<usize>(),
+        "invalid collector: `Atomic<T>` must have the size and alignment of `usize`"
+      );
+    }
+
     // SAFETY:
     // - `P::LAYOUT` describes a non-zero-sized allocation.
-    // - Its size and alignment have been validated when constructing the
-    //   associated `Params` implementation.
+    // - The assert above makes every `T` slot fit within `P::LAYOUT`.
     let raw: *mut u8 = unsafe { alloc(P::LAYOUT) };
 
     Array {
@@ -117,8 +124,8 @@ where
   /// Returns a reference to the element at `index`.
   #[inline]
   pub(crate) const fn get(&self, index: Concrete<P>) -> &T {
-    // SAFETY: `Concrete<P>` ensures that the underlying index is strictly less
-    //         than `P::LENGTH`, so it is within bounds.
+    // SAFETY: Every `Concrete<P>` comes from the unsafe `Concrete::new`, whose
+    //         callers guarantee the index is strictly less than `P::LENGTH`.
     unsafe { self.get_unchecked(index.get()) }
   }
 
@@ -143,7 +150,10 @@ where
     // - The pointer is properly aligned.
     let slot: NonNull<T> = unsafe { self.as_non_null().add(index) };
 
-    // SAFETY: `slot` is in bounds and valid for reads, as argued above.
+    // SAFETY:
+    // - `slot` is in bounds and valid for reads, as argued above.
+    // - The element is initialized. `Array::new` writes every slot through its
+    //   init closure before `assume_init`.
     unsafe { slot.as_ref() }
   }
 }
@@ -223,7 +233,9 @@ mod tests {
       });
 
       for index in 0..P::LENGTH.as_usize() {
-        assert_eq!(array.get(Concrete::<P>::new(index)), &index);
+        // SAFETY: `index` is in `0..P::LENGTH`.
+        let concrete: Concrete<P> = unsafe { Concrete::new(index) };
+        assert_eq!(array.get(concrete), &index);
       }
     });
   }
@@ -264,4 +276,65 @@ mod tests {
       }
     });
   }
+}
+
+// -----------------------------------------------------------------------------
+// Kani Proofs
+// -----------------------------------------------------------------------------
+
+#[cfg(kani)]
+mod proofs {
+  use core::mem::align_of;
+  use core::mem::size_of;
+
+  use crate::params::CACHE_LINE;
+  use crate::params::ConstParams;
+  use crate::params::Params;
+  use crate::params::ParamsExt as _;
+  use crate::params::kani_each_capacity;
+  use crate::sync::atomic::AtomicUsize;
+
+  // Checks the allocation of `P` holding slots of type `T`, without allocating.
+  fn check_slot<P, T>()
+  where
+    P: Params,
+  {
+    let length: usize = P::LENGTH.as_usize();
+    let slot: usize = size_of::<T>();
+
+    // The layout is sized for `AtomicUsize` slots, so `T` must fill the same space.
+    assert!(slot == size_of::<AtomicUsize>());
+    assert!(CACHE_LINE % align_of::<T>() == 0);
+
+    assert!(P::LAYOUT.size() == P::MEMORY);
+    assert!(P::LAYOUT.align() == CACHE_LINE);
+    assert!(P::MEMORY <= isize::MAX as usize);
+
+    assert!(length.checked_mul(size_of::<AtomicUsize>()).is_some());
+    assert!(P::BLOCKS.get().checked_mul(CACHE_LINE).is_some());
+
+    // The base is aligned to `CACHE_LINE`, so every slot offset is in bounds and
+    // aligned for `T`.
+    let index: usize = kani::any();
+    kani::assume(index < length);
+
+    assert!((index + 1) * slot <= P::MEMORY);
+    assert!((index * slot) % align_of::<T>() == 0);
+  }
+
+  macro_rules! harness {
+    ($name:ident, $bits:literal) => {
+      #[kani::proof]
+      fn $name() {
+        type P = ConstParams<{ 1 << $bits }>;
+
+        check_slot::<P, AtomicUsize>();
+        check_slot::<P, core::sync::atomic::AtomicPtr<u8>>();
+        #[cfg(feature = "sdd")]
+        check_slot::<P, sdd::AtomicOwned<u8>>();
+      }
+    };
+  }
+
+  kani_each_capacity!(harness);
 }

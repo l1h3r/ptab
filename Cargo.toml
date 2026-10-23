@@ -51,12 +51,6 @@ std = []
 # Enable support for compiling with Rust's allocation library.
 alloc = []
 
-# Enable tests that are generally quite slow.
-#
-# This configuration option is outside of the normal semver guarantees: minor
-# versions of ptab may make breaking changes to it at any time.
-slow = []
-
 # Enable the use of loom for concurrency testing.
 #
 # This configuration option is outside of the normal semver guarantees: minor
@@ -105,7 +99,7 @@ redundant_lifetimes = "deny"
 single_use_lifetimes = "deny"
 trivial_casts = "deny"
 trivial_numeric_casts = "deny"
-unexpected_cfgs = { level = "warn", check-cfg = ["cfg(coverage,coverage_nightly,loom,shuttle)"] }
+unexpected_cfgs = { level = "warn", check-cfg = ["cfg(coverage,coverage_nightly,kani,loom,shuttle,ptab_miri)", 'cfg(ptab_kani_cache_line, values("16", "32", "64", "128", "256"))'] }
 unit_bindings = "deny"
 unreachable_pub = "deny"
 unused_import_braces = "deny"
