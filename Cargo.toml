@@ -69,15 +69,6 @@ loom = ["dep:loom"]
 # versions of ptab may make breaking changes to it at any time.
 shuttle = ["dep:shuttle"]
 
-[workspace]
-members = ["benchmarks"]
-
-# Applies when benchmarking from this workspace; `benchmarks/` is not published.
-[profile.bench]
-strip = "symbols"
-lto = "fat"
-codegen-units = 1
-
 # ------------------------------------------------------------------------------
 # Rustc Lints
 # https://doc.rust-lang.org/rustc/lints/index.html
