@@ -23,6 +23,7 @@ use crate::table::Permit;
 use crate::table::RESERVED;
 use crate::table::SlotArray;
 use crate::table::Table;
+use crate::utils::refute;
 
 type DefParams = ConstParams<{ Capacity::DEF.as_usize() }>;
 type MaxParams = ConstParams<{ Capacity::MAX.as_usize() }>;
@@ -31,12 +32,6 @@ type MinParams = ConstParams<{ Capacity::MIN.as_usize() }>;
 type ReadOnly<P = DefParams> = table::ReadOnly<u64, P>;
 
 const THREADS: usize = 8;
-
-macro_rules! refute {
-  ($cond:expr $(,)?) => {
-    ::core::assert!(!$cond);
-  };
-}
 
 macro_rules! make_drop {
   ($name:ident) => {
@@ -402,7 +397,7 @@ fn remove() {
   let index: Detached = table.insert(123).unwrap();
 
   assert_eq!(table.len(), 1);
-  assert!(!table.is_empty());
+  refute!(table.is_empty());
 
   assert!(table.remove(index));
 

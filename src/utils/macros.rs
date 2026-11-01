@@ -20,3 +20,11 @@ macro_rules! each_capacity {
 }
 
 pub(crate) use each_capacity;
+
+macro_rules! refute {
+  ($cond:expr $(,)?) => {
+    ::core::assert!(!$cond);
+  };
+}
+
+pub(crate) use refute;
