@@ -1,6 +1,18 @@
 use core::ops::Deref;
 use core::ops::DerefMut;
 
+// -----------------------------------------------------------------------------
+// Tests
+// -----------------------------------------------------------------------------
+
+#[cfg_attr(coverage_nightly, coverage(off))]
+#[cfg(test)]
+mod tests;
+
+// -----------------------------------------------------------------------------
+// Implementation
+// -----------------------------------------------------------------------------
+
 /// Pads and aligns a value to the length of a cache line.
 ///
 /// Alignment varies by architecture; see [`CACHE_LINE`] for the effective size.
@@ -80,23 +92,5 @@ impl<T> DerefMut for CachePadded<T> {
   #[inline]
   fn deref_mut(&mut self) -> &mut T {
     &mut self.value
-  }
-}
-
-// -----------------------------------------------------------------------------
-// Tests
-// -----------------------------------------------------------------------------
-
-#[cfg_attr(coverage_nightly, coverage(off))]
-#[cfg(test)]
-mod tests {
-  use crate::padded::CachePadded;
-
-  #[test]
-  fn works() {
-    let mut value: CachePadded<u8> = CachePadded::new(123);
-
-    assert_eq!(&*value, &123);
-    assert_eq!(&mut *value, &123);
   }
 }
