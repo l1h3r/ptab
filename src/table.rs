@@ -299,9 +299,11 @@ where
 // SAFETY:
 // - `Table` provides shared access to entries from multiple threads.
 // - This is only sound if `T: Sync`, as multiple shared references may be held.
+// - `remove` and `Drop` drop a value on a thread other than the one that
+//   inserted it, which needs `T: Send`.
 unsafe impl<T, P> Sync for Table<T, P>
 where
-  T: Sync,
+  T: Send + Sync,
   P: Params + ?Sized,
 {
 }

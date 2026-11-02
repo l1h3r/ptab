@@ -106,3 +106,26 @@ mod unwind_safe {
   /// ```
   const WEAK_KEYS_UNWIND_SAFE: () = ();
 }
+
+#[cfg(doctest)]
+mod sync_send {
+  /// `MutexGuard<'static, u32>` lacks `Send`.
+  ///
+  /// ```compile_fail,E0277
+  /// use std::sync::MutexGuard;
+  /// use ptab::PTab;
+  ///
+  /// fn assert_sync<T: Sync>() {}
+  ///
+  /// assert_sync::<PTab<MutexGuard<'static, u32>>>();
+  /// ```
+  ///
+  /// ```
+  /// use ptab::PTab;
+  ///
+  /// fn assert_sync<T: Sync>() {}
+  ///
+  /// assert_sync::<PTab<u32>>();
+  /// ```
+  const PTAB_SYNC_NEEDS_SEND: () = ();
+}
