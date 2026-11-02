@@ -8,6 +8,8 @@ use crate::params::ParamsExt as _;
 use crate::params::derive_blocks;
 use crate::params::derive_layout;
 use crate::utils::each_capacity;
+use crate::utils::std::String;
+use crate::utils::std::format;
 
 #[test]
 fn capacity_new_clamp_under_min() {

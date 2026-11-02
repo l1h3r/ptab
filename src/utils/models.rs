@@ -1,30 +1,10 @@
-#![allow(unused_imports, reason = "conditional")]
-
 #[cfg(all(loom, shuttle))]
 compile_error!("expected one of `--cfg loom` or `--cfg shuttle`.");
 
-#[cfg(all(feature = "alloc", not(feature = "std")))]
-mod rust_alloc {
-  pub(crate) use ::rust_alloc::alloc::Layout;
-  pub(crate) use ::rust_alloc::alloc::alloc;
-  pub(crate) use ::rust_alloc::alloc::dealloc;
-  pub(crate) use ::rust_alloc::alloc::handle_alloc_error;
-  pub(crate) use ::rust_alloc::boxed::Box;
-}
-
-#[cfg(feature = "std")]
-mod rust_alloc {
-  pub(crate) use ::std::alloc::Layout;
-  pub(crate) use ::std::alloc::alloc;
-  pub(crate) use ::std::alloc::dealloc;
-  pub(crate) use ::std::alloc::handle_alloc_error;
-  pub(crate) use ::std::boxed::Box;
-}
-
 #[cfg(loom)]
 pub(crate) mod alloc {
-  pub(crate) use super::rust_alloc::Box;
-  pub(crate) use super::rust_alloc::handle_alloc_error;
+  pub(crate) use crate::utils::std::Box;
+  pub(crate) use crate::utils::std::handle_alloc_error;
   pub(crate) use ::loom::alloc::Layout;
   pub(crate) use ::loom::alloc::alloc;
   pub(crate) use ::loom::alloc::dealloc;
@@ -32,11 +12,11 @@ pub(crate) mod alloc {
 
 #[cfg(not(loom))]
 pub(crate) mod alloc {
-  pub(crate) use super::rust_alloc::Box;
-  pub(crate) use super::rust_alloc::Layout;
-  pub(crate) use super::rust_alloc::alloc;
-  pub(crate) use super::rust_alloc::dealloc;
-  pub(crate) use super::rust_alloc::handle_alloc_error;
+  pub(crate) use crate::utils::std::Box;
+  pub(crate) use crate::utils::std::Layout;
+  pub(crate) use crate::utils::std::alloc;
+  pub(crate) use crate::utils::std::dealloc;
+  pub(crate) use crate::utils::std::handle_alloc_error;
 }
 
 #[cfg(not(any(loom, shuttle)))]

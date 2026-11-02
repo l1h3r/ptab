@@ -1,6 +1,11 @@
+#![allow(unused_imports, reason = "conditional")]
+#![allow(unused_macros, reason = "conditional")]
+
 #[cfg(test)]
 mod macros;
 mod models;
+
+pub(crate) mod std;
 
 #[cfg(test)]
 pub(crate) use self::macros::each_capacity;

@@ -1,3 +1,7 @@
+#![allow(clippy::let_unit_value, reason = "conditional")]
+#![allow(clippy::unit_arg, reason = "conditional")]
+#![cfg(feature = "sdd")] // TODO: FIXME
+
 use std::collections::HashSet;
 use std::sync::Arc;
 use std::sync::Barrier;
@@ -24,6 +28,9 @@ use crate::table::RESERVED;
 use crate::table::SlotArray;
 use crate::table::Table;
 use crate::utils::refute;
+
+#[allow(unused_imports, reason = "conditional")]
+use crate::reclaim::Shared as _;
 
 type DefParams = ConstParams<{ Capacity::DEF.as_usize() }>;
 type MaxParams = ConstParams<{ Capacity::MAX.as_usize() }>;

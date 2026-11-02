@@ -1,5 +1,3 @@
-use std::collections::HashSet;
-
 use crate::index::Abstract;
 use crate::index::Concrete;
 use crate::index::Detached;
@@ -7,6 +5,8 @@ use crate::params::CACHE_LINE_SLOTS;
 use crate::params::Params as _;
 use crate::params::ParamsExt as _;
 use crate::utils::each_capacity;
+use crate::utils::std::BTreeSet;
+use crate::utils::std::format;
 
 #[expect(clippy::clone_on_copy, reason = "exercises the `Clone` impl")]
 #[test]
@@ -94,7 +94,7 @@ fn detached_decompose() {
 #[test]
 fn abstract_to_concrete_covers_all_slots() {
   each_capacity!({
-    let mut used: HashSet<usize> = HashSet::with_capacity(P::LENGTH.as_usize());
+    let mut used: BTreeSet<usize> = BTreeSet::new();
 
     for index in 0..P::LENGTH.as_usize() {
       let abstract_idx: Abstract<P> = Abstract::new(index);
@@ -146,7 +146,7 @@ fn cache_line_distribution() {
     }
 
     // First `CACHE_LINE_SLOTS` indices should map to different blocks
-    let mut blocks: HashSet<usize> = HashSet::with_capacity(CACHE_LINE_SLOTS);
+    let mut blocks: BTreeSet<usize> = BTreeSet::new();
 
     for index in 0..P::LENGTH.as_usize() {
       let abstract_idx: Abstract<P> = Abstract::new(index);
