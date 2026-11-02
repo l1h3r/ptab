@@ -65,10 +65,17 @@ where
   /// Constructs a new array with uninitialized contents.
   #[inline]
   pub(crate) fn new_uninit() -> Array<MaybeUninit<T>, P> {
+    const {
+      assert!(
+        size_of::<T>() == size_of::<usize>() && align_of::<T>() == align_of::<usize>(),
+        "`Atomic<T>` must have the size and alignment of `usize`"
+      );
+    }
+
     // SAFETY:
     // - `P::LAYOUT` describes a non-zero-sized allocation.
-    // - Its size and alignment have been validated when constructing the
-    //   associated `Params` implementation.
+    // - `P::LAYOUT` fits `P::LENGTH` values of `usize`, and `T` has the size
+    //   and alignment of `usize`.
     let raw: *mut u8 = unsafe { alloc(P::LAYOUT) };
 
     Array {

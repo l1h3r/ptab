@@ -58,6 +58,93 @@ pub unsafe trait Collector: CollectorWeak {}
 /// - Reclamation of objects reachable by that guard must be deferred.
 /// - Returned [`Shared`] pointers are guaranteed valid for the guard lifetime.
 ///
+/// # Atomic size
+///
+/// `Atomic<T>` must have the size and alignment of `usize`. A table whose
+/// collector breaks this fails to compile:
+///
+/// ```compile_fail
+/// use core::mem::MaybeUninit;
+/// use core::sync::atomic::Ordering;
+/// use ptab::memory::{Atomic, CollectorWeak, Shared};
+/// use ptab::{PTab, Params};
+///
+/// struct Wide([usize; 4]);
+/// struct Ptr;
+/// struct Weak;
+/// struct P;
+///
+/// impl<'guard, T> Shared<'guard, T> for Ptr {
+///   fn is_null(&self) -> bool { true }
+///   fn as_ref(&self) -> Option<&'guard T> { None }
+/// }
+///
+/// impl<T> Atomic<T> for Wide {
+///   type Guard = ();
+///   type Shared<'guard> = Ptr where T: 'guard;
+///   fn null() -> Self { Wide([0; 4]) }
+///   fn read<'guard>(&self, _: Ordering, _: &'guard ()) -> Ptr { Ptr }
+///   fn write(&self, _: Ordering, _: impl FnOnce(&mut MaybeUninit<T>)) where T: 'static {}
+///   fn evict(&self, _: Ordering) -> bool { false }
+///   unsafe fn clear(&mut self) -> bool { false }
+/// }
+///
+/// impl CollectorWeak for Weak {
+///   type Guard = ();
+///   type Atomic<T> = Wide;
+///   fn guard() {}
+///   fn flush() {}
+/// }
+///
+/// impl Params for P {
+///   type Collector = Weak;
+/// }
+///
+/// let _table: PTab<u8, P> = PTab::new();
+/// ```
+///
+/// The same collector with a `usize`-wide `Atomic` compiles:
+///
+/// ```
+/// use core::mem::MaybeUninit;
+/// use core::sync::atomic::Ordering;
+/// use ptab::memory::{Atomic, CollectorWeak, Shared};
+/// use ptab::{PTab, Params};
+///
+/// struct Wide(usize);
+/// struct Ptr;
+/// struct Weak;
+/// struct P;
+///
+/// impl<'guard, T> Shared<'guard, T> for Ptr {
+///   fn is_null(&self) -> bool { true }
+///   fn as_ref(&self) -> Option<&'guard T> { None }
+/// }
+///
+/// impl<T> Atomic<T> for Wide {
+///   type Guard = ();
+///   type Shared<'guard> = Ptr where T: 'guard;
+///   fn null() -> Self { Wide(0) }
+///   fn read<'guard>(&self, _: Ordering, _: &'guard ()) -> Ptr { Ptr }
+///   fn write(&self, _: Ordering, _: impl FnOnce(&mut MaybeUninit<T>)) where T: 'static {}
+///   fn evict(&self, _: Ordering) -> bool { false }
+///   unsafe fn clear(&mut self) -> bool { false }
+/// }
+///
+/// impl CollectorWeak for Weak {
+///   type Guard = ();
+///   type Atomic<T> = Wide;
+///   fn guard() {}
+///   fn flush() {}
+/// }
+///
+/// impl Params for P {
+///   type Collector = Weak;
+/// }
+///
+/// let _table: PTab<u8, P> = PTab::new();
+/// ```
+///
 /// [`Atomic`]: crate::reclaim::CollectorWeak::Atomic
 /// [`Atomic::read()`]: crate::reclaim::Atomic::read
 /// [`Atomic::evict()`]: crate::reclaim::Atomic::evict
@@ -66,13 +153,6 @@ pub unsafe trait Collector: CollectorWeak {}
 /// [`Guard`]: crate::reclaim::CollectorWeak::Guard
 /// [`Shared`]: crate::reclaim::Atomic::Shared
 pub trait CollectorWeak {
-  /// Ensure `Atomic<T>` has the same size and alignment as a raw pointer.
-  #[doc(hidden)]
-  const ASSERT_ATOMIC: () = {
-    assert!(align_of::<Self::Atomic<()>>() == align_of::<usize>());
-    assert!(size_of::<Self::Atomic<()>>() == size_of::<usize>());
-  };
-
   /// A guard that keeps the current thread pinned.
   type Guard;
 
