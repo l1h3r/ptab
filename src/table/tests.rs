@@ -2,11 +2,13 @@
 #![allow(clippy::unit_arg, reason = "conditional")]
 #![cfg(feature = "sdd")] // TODO: FIXME
 
+use core::time::Duration;
 use std::collections::HashSet;
 use std::sync::Arc;
 use std::sync::Barrier;
 use std::thread;
 use std::thread::JoinHandle;
+use std::time::Instant;
 
 use crate::index::Abstract;
 use crate::index::Concrete;
@@ -680,9 +682,15 @@ fn drop_half_full() {
 
   // `Sdd::flush` frees the removed entries once no other thread is pinned in an
   // older epoch.
-  DefParams::flush();
+  let expected: u32 = table.cap() as u32 / 2;
+  let deadline: Instant = Instant::now() + Duration::from_secs(10);
 
-  assert_eq!(DropMe::load(), table.cap() as u32 / 2);
+  while DropMe::load() > expected && Instant::now() < deadline {
+    DefParams::flush();
+    thread::sleep(Duration::from_millis(1));
+  }
+
+  assert_eq!(DropMe::load(), expected);
   assert_eq!(DropMe::load(), table.len());
   drop(table);
   assert_eq!(DropMe::load(), 0);
