@@ -305,10 +305,20 @@ where
 {
 }
 
-// Unconditional because `Table` provides only shared access to `T` via `with`,
-// and epoch-based reclamation handles panic unwind safely.
-impl<T, P> RefUnwindSafe for Table<T, P> where P: Params + ?Sized {}
-impl<T, P> UnwindSafe for Table<T, P> where P: Params + ?Sized {}
+// Unwind safe only when `T: RefUnwindSafe` since `with` and `read` expose `&T`.
+impl<T, P> RefUnwindSafe for Table<T, P>
+where
+  T: RefUnwindSafe,
+  P: Params + ?Sized,
+{
+}
+
+impl<T, P> UnwindSafe for Table<T, P>
+where
+  T: RefUnwindSafe,
+  P: Params + ?Sized,
+{
+}
 
 impl<T, P> Debug for Table<T, P>
 where
