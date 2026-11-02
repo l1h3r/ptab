@@ -15,57 +15,6 @@ jobs:
   pre_ci:
     uses: dtolnay/.github/.github/workflows/pre_ci.yml@master
 
-  test:
-    name: Test ${{matrix.rust}}
-    needs: pre_ci
-    if: needs.pre_ci.outputs.continue
-    runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        rust: [nightly, beta, stable]
-    timeout-minutes: 45
-    steps:
-      - uses: actions/checkout@v6
-      - uses: dtolnay/rust-toolchain@master
-        with:
-          toolchain: ${{matrix.rust}}
-      - run: cargo test
-
-  loom:
-    name: Loom ${{matrix.rust}}
-    needs: pre_ci
-    if: needs.pre_ci.outputs.continue
-    runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        rust: [nightly, beta, stable]
-    timeout-minutes: 45
-    steps:
-      - uses: actions/checkout@v6
-      - uses: dtolnay/rust-toolchain@master
-        with:
-          toolchain: ${{matrix.rust}}
-      - run: ./bin/loom.sh
-
-  shuttle:
-    name: Shuttle ${{matrix.rust}}
-    needs: pre_ci
-    if: needs.pre_ci.outputs.continue
-    runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        rust: [nightly, beta, stable]
-    timeout-minutes: 45
-    steps:
-      - uses: actions/checkout@v6
-      - uses: dtolnay/rust-toolchain@master
-        with:
-          toolchain: ${{matrix.rust}}
-      - run: ./bin/shuttle.sh
-
   msrv:
     name: Rust 1.91.0
     needs: pre_ci
@@ -75,10 +24,13 @@ jobs:
     steps:
       - uses: actions/checkout@v6
       - uses: dtolnay/rust-toolchain@1.91.0
-      - run: cargo check --all-targets --all-features
+        id: rust
+      - run: ./bin/check msrv
+        env:
+          MSRV: ${{steps.rust.outputs.name}}
 
   doc:
-    name: Documentation
+    name: Rustdoc
     needs: pre_ci
     if: needs.pre_ci.outputs.continue
     runs-on: ubuntu-latest
@@ -91,19 +43,18 @@ jobs:
       - uses: dtolnay/install@cargo-docs-rs
       - run: cargo docs-rs
 
-  miri:
-    name: Miri
+  fmt:
+    name: Rustfmt
     needs: pre_ci
     if: needs.pre_ci.outputs.continue
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v6
-      - uses: dtolnay/rust-toolchain@miri
-      - run: cargo miri setup
-      - run: cargo miri test
-        env:
-          MIRIFLAGS: -Zmiri-strict-provenance
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+      - run: ./bin/check rustfmt
 
   clippy:
     name: Clippy
@@ -113,7 +64,67 @@ jobs:
     steps:
       - uses: actions/checkout@v6
       - uses: dtolnay/rust-toolchain@clippy
-      - run: cargo clippy --all-targets
+      - run: ./bin/check clippy
+
+  test:
+    name: Test (${{matrix.rust}})
+    needs: pre_ci
+    if: needs.pre_ci.outputs.continue
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        rust: [nightly, beta, stable]
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{matrix.rust}}
+      - run: ./bin/check tests
+
+  loom:
+    name: Loom
+    needs: pre_ci
+    if: needs.pre_ci.outputs.continue
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@stable
+      - run: ./bin/check loom
+
+  shuttle:
+    name: Shuttle
+    needs: pre_ci
+    if: needs.pre_ci.outputs.continue
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@stable
+      - run: ./bin/check shuttle
+
+  miri:
+    name: Miri (${{matrix.arch}})
+    needs: pre_ci
+    if: needs.pre_ci.outputs.continue
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { arch: host, target: '' }
+          - { arch: i686, target: --target i686-unknown-linux-gnu }
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@miri
+        id: rust
+      - run: cargo miri setup ${{matrix.target}}
+      - run: ./bin/check miri ${{matrix.target}}
+        env:
+          RUST_NIGHTLY: ${{steps.rust.outputs.name}}
 
   asan:
     name: Address Sanitizer
@@ -125,11 +136,8 @@ jobs:
       - uses: actions/checkout@v6
       - uses: dtolnay/rust-toolchain@nightly
         with:
-          components: rust-src
-      - run: cargo test --lib --target x86_64-unknown-linux-gnu -Zbuild-std
-        env:
-          RUSTFLAGS: -Zsanitizer=address
-          ASAN_OPTIONS: detect_leaks=0
+          targets: x86_64-unknown-linux-gnuasan
+      - run: ./bin/check asan --target x86_64-unknown-linux-gnuasan
 
   tsan:
     name: Thread Sanitizer
@@ -141,7 +149,5 @@ jobs:
       - uses: actions/checkout@v6
       - uses: dtolnay/rust-toolchain@nightly
         with:
-          components: rust-src
-      - run: cargo test --lib --target x86_64-unknown-linux-gnu -Zbuild-std
-        env:
-          RUSTFLAGS: -Zsanitizer=thread
+          targets: x86_64-unknown-linux-gnutsan
+      - run: ./bin/check tsan --target x86_64-unknown-linux-gnutsan
