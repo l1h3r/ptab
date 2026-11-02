@@ -321,6 +321,7 @@ fn generate_next_slot_skips_reserved() {
 fn slot_churn() {
   static PERMITS: AtomicUsize = AtomicUsize::new(0);
   static UNIQUES: AtomicUsize = AtomicUsize::new(0);
+  static RELEASES: AtomicUsize = AtomicUsize::new(0);
 
   let table: Arc<Table<usize, DefParams>> = Arc::new(Table::new());
   let barrier: Arc<Barrier> = Arc::new(Barrier::new(THREADS + 1));
@@ -334,8 +335,8 @@ fn slot_churn() {
     let table: Arc<Table<usize, DefParams>> = Arc::clone(&table);
 
     threads.push(thread::spawn(move || {
-      let mut track: Vec<usize> = Vec::with_capacity(capacity);
-      let mut index: usize = 0;
+      let mut track: Vec<usize> = Vec::with_capacity(capacity * 4);
+      let mut released: usize = 0;
 
       barrier.wait();
 
@@ -343,19 +344,21 @@ fn slot_churn() {
         for _ in 0..capacity {
           if let Some(permit) = table.reserve_slot() {
             track.push(table.acquire_slot(permit).get());
-            index += 1;
 
             assert!(table.len() <= capacity as u32);
-            assert!(PERMITS.fetch_add(1, Ordering::Relaxed) <= capacity);
+            assert!(PERMITS.fetch_add(1, Ordering::Relaxed) < capacity);
 
             UNIQUES.fetch_add(1, Ordering::Relaxed);
           }
 
-          if index.is_multiple_of(2)
-            && let Some(index) = track[index..].first()
+          if track.len().is_multiple_of(2)
+            && let Some(key) = track.get(released)
           {
-            table.release_slot(Abstract::new(*index));
             PERMITS.fetch_sub(1, Ordering::Relaxed);
+            table.release_slot(Abstract::new(*key));
+            released += 1;
+
+            RELEASES.fetch_add(1, Ordering::Relaxed);
           }
 
           thread::yield_now();
@@ -375,7 +378,12 @@ fn slot_churn() {
   }
 
   assert_eq!(uniques.len(), UNIQUES.load(Ordering::Relaxed));
-  assert_eq!(table.cap(), PERMITS.load(Ordering::Relaxed));
+  assert_ne!(RELEASES.load(Ordering::Relaxed), 0);
+  assert_eq!(
+    table.len() as usize,
+    UNIQUES.load(Ordering::Relaxed) - RELEASES.load(Ordering::Relaxed),
+  );
+  assert_eq!(table.len() as usize, PERMITS.load(Ordering::Relaxed));
 }
 
 // -----------------------------------------------------------------------------
