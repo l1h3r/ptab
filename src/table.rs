@@ -19,6 +19,7 @@ use crate::params::Params;
 use crate::params::ParamsExt;
 use crate::reclaim;
 use crate::reclaim::Atomic as _;
+use crate::reclaim::Collector;
 use crate::reclaim::CollectorWeak;
 use crate::reclaim::Shared as _;
 use crate::sync::atomic::AtomicU32;
@@ -146,6 +147,7 @@ where
   pub(crate) fn remove(&self, key: Detached) -> bool
   where
     T: Send,
+    P::Collector: Collector,
   {
     let index: Concrete<P> = Concrete::from_detached(key);
     let entry: &Atomic<T, P> = self.readonly.data.get(index);
