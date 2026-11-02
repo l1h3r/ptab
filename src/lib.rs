@@ -105,6 +105,19 @@ mod utils;
 pub(crate) use crate::utils::alloc;
 pub(crate) use crate::utils::sync;
 
+/// Frees the boxes behind the shuttle atomics made so far. The shuttle model
+/// tests call it between iterations. Not part of the API.
+///
+/// # Safety
+///
+/// After the call, no table made before it may run a method or drop.
+#[cfg(shuttle)]
+#[doc(hidden)]
+pub unsafe fn __shuttle_free_atomics() {
+  // SAFETY: the caller upholds the contract of `free_atomics`.
+  unsafe { sync::atomic::free_atomics() }
+}
+
 pub mod implementation {
   #![doc = include_str!("../IMPLEMENTATION.md")]
 }

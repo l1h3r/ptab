@@ -29,7 +29,14 @@ mod model {
     where
       F: Fn() + Sync + Send + 'static,
     {
-      shuttle::check_random(f, ITERATIONS);
+      shuttle::check_random(
+        move || {
+          f();
+          // SAFETY: `f` returned, so its tables have dropped and its threads have joined.
+          unsafe { ptab::__shuttle_free_atomics() };
+        },
+        ITERATIONS,
+      );
     }
   }
 

@@ -40,17 +40,36 @@ pub(crate) mod sync {
 #[cfg(shuttle)]
 pub(crate) mod sync {
   pub(crate) mod atomic {
+    use ::core::cell::RefCell;
+
+    ::std::thread_local! {
+      /// The boxes behind every `AtomicUsize` this thread made since its last
+      /// [`free_atomics`], as addresses.
+      static BOXES: RefCell<Vec<usize>> = const { RefCell::new(Vec::new()) };
+    }
+
+    /// A pointer-sized handle to shuttle's wider atomic. `Array::drop` never
+    /// drops its elements, and [`free_atomics`] frees the box.
     #[repr(transparent)]
     pub(crate) struct AtomicUsize {
-      inner: Box<::shuttle::sync::atomic::AtomicUsize>,
+      inner: *mut ::shuttle::sync::atomic::AtomicUsize,
     }
+
+    // SAFETY: the pointee, a shuttle atomic, implements `Send` and `Sync` and
+    // stays allocated until `free_atomics`.
+    unsafe impl Send for AtomicUsize {}
+    // SAFETY: as for `Send`.
+    unsafe impl Sync for AtomicUsize {}
 
     impl AtomicUsize {
       #[inline]
       pub(crate) fn new(value: usize) -> Self {
-        Self {
-          inner: Box::new(::shuttle::sync::atomic::AtomicUsize::new(value)),
-        }
+        let inner: *mut ::shuttle::sync::atomic::AtomicUsize =
+          Box::into_raw(Box::new(::shuttle::sync::atomic::AtomicUsize::new(value)));
+
+        BOXES.with_borrow_mut(|boxes: &mut Vec<usize>| boxes.push(inner as usize));
+
+        Self { inner }
       }
     }
 
@@ -59,7 +78,25 @@ pub(crate) mod sync {
 
       #[inline]
       fn deref(&self) -> &Self::Target {
-        &self.inner
+        // SAFETY: `inner` came from `Box::into_raw` in `new`. Only `free_atomics`
+        // frees it, and its caller promises that no handle remains in use.
+        unsafe { &*self.inner }
+      }
+    }
+
+    /// Frees the box behind every `AtomicUsize` the calling thread made so far.
+    ///
+    /// # Safety
+    ///
+    /// After the call, no handle made before it may run a method, and no table
+    /// that contains one may drop.
+    pub(crate) unsafe fn free_atomics() {
+      let boxes: Vec<usize> = BOXES.with_borrow_mut(::core::mem::take);
+
+      for address in boxes {
+        // SAFETY: `address` came from `Box::into_raw` in `new` and appears once
+        // in the list, so this frees it once.
+        drop(unsafe { Box::from_raw(address as *mut ::shuttle::sync::atomic::AtomicUsize) });
       }
     }
 
