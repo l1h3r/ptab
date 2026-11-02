@@ -48,9 +48,12 @@ use ptab::Detached;
 use ptab::PTab;
 
 type Insert = JoinHandle<Option<Detached>>;
+#[cfg(feature = "sdd")]
 type Remove = JoinHandle<bool>;
 type Lookup = JoinHandle<Option<usize>>;
+#[cfg(feature = "sdd")]
 type Exists = JoinHandle<bool>;
+#[cfg(feature = "sdd")]
 type Reader<T = usize> = JoinHandle<Option<T>>;
 
 type ArcTable = Arc<PTab<usize, ConstParams<{ Capacity::MIN.as_usize() }>>>;
@@ -71,6 +74,7 @@ impl Table {
     thread::spawn(move || table.insert(value))
   }
 
+  #[cfg(feature = "sdd")]
   fn spawn_remove(&self, index: Detached) -> Remove {
     let table: ArcTable = ArcTable::clone(&self.inner);
     thread::spawn(move || table.remove(index))
@@ -81,11 +85,13 @@ impl Table {
     thread::spawn(move || table.read(index))
   }
 
+  #[cfg(feature = "sdd")]
   fn spawn_exists(&self, index: Detached) -> Exists {
     let table: ArcTable = ArcTable::clone(&self.inner);
     thread::spawn(move || table.exists(index))
   }
 
+  #[cfg(feature = "sdd")]
   fn spawn_reader<T, F>(&self, index: Detached, f: F) -> Reader<T>
   where
     T: Send + 'static,
@@ -138,6 +144,7 @@ fn test_insert_read() {
   });
 }
 
+#[cfg(feature = "sdd")]
 #[test]
 fn test_insert_remove() {
   model::check(|| {
@@ -153,6 +160,7 @@ fn test_insert_remove() {
   });
 }
 
+#[cfg(feature = "sdd")]
 #[test]
 fn test_insert_remove_read() {
   model::check(|| {
@@ -172,6 +180,7 @@ fn test_insert_remove_read() {
   });
 }
 
+#[cfg(feature = "sdd")]
 #[test]
 fn test_remove() {
   model::check(|| {
@@ -192,6 +201,7 @@ fn test_remove() {
   });
 }
 
+#[cfg(feature = "sdd")]
 #[test]
 fn test_remove_race() {
   model::check(|| {
@@ -212,6 +222,7 @@ fn test_remove_race() {
   });
 }
 
+#[cfg(feature = "sdd")]
 #[test]
 fn test_remove_race_read() {
   model::check(|| {
@@ -229,6 +240,7 @@ fn test_remove_race_read() {
   });
 }
 
+#[cfg(feature = "sdd")]
 #[test]
 fn test_remove_race_read_multi() {
   model::check(|| {
@@ -250,6 +262,7 @@ fn test_remove_race_read_multi() {
   });
 }
 
+#[cfg(feature = "sdd")]
 #[test]
 fn test_remove_race_exists() {
   model::check(|| {
@@ -266,6 +279,7 @@ fn test_remove_race_exists() {
   });
 }
 
+#[cfg(feature = "sdd")]
 #[test]
 fn test_remove_race_with() {
   model::check(|| {
@@ -328,6 +342,7 @@ fn test_length_consistency() {
   });
 }
 
+#[cfg(feature = "sdd")]
 #[test]
 fn test_length_insert_remove() {
   model::check(|| {
@@ -344,6 +359,7 @@ fn test_length_insert_remove() {
   });
 }
 
+#[cfg(feature = "sdd")]
 #[test]
 fn remove_and_reinsert() {
   model::check(|| {
@@ -393,6 +409,7 @@ fn test_three_way_insert() {
   });
 }
 
+#[cfg(feature = "sdd")]
 #[test]
 fn test_concurrent_remove_reinsert() {
   model::check(|| {
@@ -433,6 +450,7 @@ fn test_concurrent_remove_reinsert() {
   });
 }
 
+#[cfg(feature = "sdd")]
 #[test]
 fn test_read_unaffected_by_other_remove() {
   model::check(|| {
