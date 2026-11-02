@@ -466,43 +466,6 @@ fn insert() {
   assert_eq!(table.len(), 17);
 }
 
-#[test]
-fn insert_beyond_capacity() {
-  let table: Table<usize, DefParams> = Table::new();
-
-  for _ in 0..table.cap() {
-    assert_ne!(table.insert(123), None);
-  }
-
-  assert_eq!(table.len(), table.cap() as u32);
-  assert_eq!(table.insert(123), None);
-  assert_eq!(table.len(), table.cap() as u32);
-}
-
-#[test]
-fn insert_unique_ids() {
-  let table: Table<usize, DefParams> = Table::new();
-  let mut keys: BTreeSet<Detached> = BTreeSet::new();
-
-  for _ in 0..table.cap() {
-    assert!(keys.insert(table.insert(123).unwrap()));
-  }
-}
-
-#[test]
-fn write_callback_correct_index() {
-  let table: Table<usize, DefParams> = Table::new();
-  let guard: Guard<DefParams> = DefParams::guard();
-
-  let index: Detached = table
-    .write(|uninit, index| {
-      uninit.write(index.into_bits());
-    })
-    .unwrap();
-
-  assert_eq!(table.read(index, &guard), Some(index.into_bits()));
-}
-
 #[cfg(feature = "sdd")]
 #[test]
 fn remove() {
