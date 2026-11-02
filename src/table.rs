@@ -521,7 +521,7 @@ where
     Self {
       array: table.readonly.data.as_non_null(),
       guard,
-      total: table.cap(),
+      total: P::LENGTH.as_usize(),
       index: 0,
       table: PhantomData,
     }

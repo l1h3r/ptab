@@ -511,6 +511,44 @@ fn weak_keys() {
 }
 
 #[test]
+fn weak_keys_last_slot() {
+  let table: Table<usize, MaxParams> = Table::new();
+  let index: Abstract<MaxParams> = Abstract::new(MaxParams::LENGTH.as_usize() - 1);
+  let concrete: Concrete<MaxParams> = Concrete::from_abstract(index);
+
+  table
+    .readonly
+    .data
+    .get(concrete)
+    .write(Ordering::Release, |entry| {
+      entry.write(7);
+    });
+
+  assert_eq!(table.weak_keys(MaxParams::guard()).count(), 1);
+
+  table.volatile.incr_entries();
+}
+
+#[cfg_attr(miri, ignore)]
+#[test]
+fn weak_keys_full_max() {
+  let table: Table<(), MaxParams> = Table::new();
+  let first: Detached = table.insert(()).unwrap();
+
+  for _ in 1..table.cap() {
+    table.insert(()).unwrap();
+  }
+
+  assert!(table.remove(first));
+  table.insert(()).unwrap();
+
+  assert_eq!(
+    table.weak_keys(MaxParams::guard()).count(),
+    table.len() as usize
+  );
+}
+
+#[test]
 fn drop_empty() {
   make_drop!(DropMe);
 
