@@ -232,8 +232,11 @@ where
   /// let table: PTab<i32> = PTab::new();
   /// let idx = table.insert(42).unwrap();
   ///
+  /// # #[cfg(feature = "sdd")]
+  /// # {
   /// assert!(table.remove(idx));  // Entry removed
   /// assert!(!table.remove(idx)); // Already gone
+  /// # }
   /// ```
   #[inline]
   pub fn remove(&self, index: Detached) -> bool
@@ -257,8 +260,11 @@ where
   /// let idx = table.insert(42).unwrap();
   ///
   /// assert!(table.exists(idx));
+  /// # #[cfg(feature = "sdd")]
+  /// # {
   /// table.remove(idx);
   /// assert!(!table.exists(idx));
+  /// # }
   /// ```
   #[inline]
   pub fn exists(&self, index: Detached) -> bool {

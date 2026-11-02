@@ -27,10 +27,13 @@
 //! assert_eq!(greeting, Some("HELLO".to_string()));
 //!
 //! // Remove the entry
+//! # #[cfg(feature = "sdd")]
+//! # {
 //! assert!(table.remove(index));
 //!
 //! // The entry is gone
 //! assert!(!table.exists(index));
+//! # }
 //! ```
 //!
 //! # Configuration
@@ -77,6 +80,7 @@
 //!     thread::spawn(move || {
 //!       for i in 0..100 {
 //!         if let Some(idx) = table.insert(thread_id * 1000 + i) {
+//!           # #[cfg(feature = "sdd")]
 //!           table.remove(idx);
 //!         }
 //!       }
