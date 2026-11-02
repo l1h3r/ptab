@@ -179,6 +179,60 @@ fn release_slot() {
 }
 
 #[test]
+fn release_slot_fifo() {
+  const ROUNDS: usize = 4;
+
+  let table: Table<usize, MinParams> = Table::new();
+  let cap: usize = table.cap();
+
+  let reserved_cells = |table: &Table<usize, MinParams>| -> usize {
+    table
+      .readonly
+      .slot
+      .as_slice()
+      .iter()
+      .filter(|cell| cell.load(Ordering::Relaxed) == RESERVED)
+      .count()
+  };
+
+  for _ in 0..ROUNDS {
+    let mut acquired: Vec<Abstract<MinParams>> = Vec::with_capacity(cap);
+
+    for _ in 0..cap {
+      let permit: Permit<'_, usize, MinParams> = table.reserve_slot().unwrap();
+      acquired.push(table.acquire_slot(permit));
+    }
+
+    assert_eq!(reserved_cells(&table), table.len() as usize);
+    assert_eq!(table.len() as usize, cap);
+
+    let mut expected: Vec<usize> = Vec::with_capacity(cap);
+
+    while let Some(index) = acquired.pop() {
+      expected.push(table.generate_next_slot(index));
+      table.release_slot(index);
+    }
+
+    assert_eq!(reserved_cells(&table), table.len() as usize);
+    assert!(table.is_empty());
+
+    for want in expected {
+      let permit: Permit<'_, usize, MinParams> = table.reserve_slot().unwrap();
+      let got: Abstract<MinParams> = table.acquire_slot(permit);
+
+      assert_eq!(got.get(), want);
+      acquired.push(got);
+    }
+
+    for index in acquired {
+      table.release_slot(index);
+    }
+
+    assert_eq!(reserved_cells(&table), 0);
+  }
+}
+
+#[test]
 fn generate_next_slot() {
   let table: Table<usize, DefParams> = Table::new();
 

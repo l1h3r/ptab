@@ -237,7 +237,7 @@ where
       .readonly
       .slot
       .get(Concrete::from_abstract(self.volatile.fetch_free_id()))
-      .compare_exchange_weak(RESERVED, data, Relaxed, Relaxed)
+      .compare_exchange(RESERVED, data, Relaxed, Relaxed)
       .is_err()
     {}
 
