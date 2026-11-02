@@ -215,11 +215,11 @@ fn test_remove_race() {
     let table: Table = Table::new();
     let index: Detached = table.insert(123).unwrap();
 
-    let remove_a: Remove = table.spawn_remove(index);
-    let remove_b: Remove = table.spawn_remove(index);
+    let handle_a: Remove = table.spawn_remove(index);
+    let handle_b: Remove = table.spawn_remove(index);
 
-    let removed_a: bool = remove_a.join().unwrap();
-    let removed_b: bool = remove_b.join().unwrap();
+    let removed_a: bool = handle_a.join().unwrap();
+    let removed_b: bool = handle_b.join().unwrap();
 
     assert!(removed_a || removed_b, "at least one remove should succeed");
     assert!(removed_a != removed_b, "exactly one remove should succeed");
