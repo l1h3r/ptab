@@ -142,7 +142,10 @@ where
   }
 
   #[inline]
-  pub(crate) fn remove(&self, key: Detached) -> bool {
+  pub(crate) fn remove(&self, key: Detached) -> bool
+  where
+    T: Send,
+  {
     let index: Concrete<P> = Concrete::from_detached(key);
     let entry: &Atomic<T, P> = self.readonly.data.get(index);
 

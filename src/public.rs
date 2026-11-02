@@ -12,6 +12,17 @@ use crate::table::Table;
 
 pub use crate::table::WeakKeys;
 
+// -----------------------------------------------------------------------------
+// Tests
+// -----------------------------------------------------------------------------
+
+#[cfg(doctest)]
+mod tests;
+
+// -----------------------------------------------------------------------------
+// Implementation
+// -----------------------------------------------------------------------------
+
 /// A lock-free concurrent table.
 ///
 /// `PTab` stores entries of type `T` and provides concurrent access through
@@ -227,6 +238,7 @@ where
   #[inline]
   pub fn remove(&self, index: Detached) -> bool
   where
+    T: Send,
     P::Collector: Collector, // Enforce safe reclamation
   {
     self.inner.remove(index)
