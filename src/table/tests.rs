@@ -1,13 +1,17 @@
 #![allow(clippy::let_unit_value, reason = "conditional")]
 #![allow(clippy::unit_arg, reason = "conditional")]
-#![cfg(feature = "sdd")] // TODO: FIXME
 
+#[cfg(feature = "sdd")]
 use core::time::Duration;
-use std::collections::HashSet;
+#[cfg(feature = "std")]
 use std::sync::Arc;
+#[cfg(feature = "std")]
 use std::sync::Barrier;
+#[cfg(feature = "std")]
 use std::thread;
+#[cfg(feature = "std")]
 use std::thread::JoinHandle;
+#[cfg(feature = "sdd")]
 use std::time::Instant;
 
 use crate::index::Abstract;
@@ -30,6 +34,10 @@ use crate::table::RESERVED;
 use crate::table::SlotArray;
 use crate::table::Table;
 use crate::utils::refute;
+use crate::utils::std::BTreeSet;
+use crate::utils::std::String;
+use crate::utils::std::Vec;
+use crate::utils::std::format;
 
 #[allow(unused_imports, reason = "conditional")]
 use crate::reclaim::Shared as _;
@@ -40,6 +48,7 @@ type MinParams = ConstParams<{ Capacity::MIN.as_usize() }>;
 
 type ReadOnly<P = DefParams> = table::ReadOnly<u64, P>;
 
+#[cfg(feature = "std")]
 const THREADS: usize = 8;
 
 macro_rules! make_drop {
@@ -113,6 +122,7 @@ fn reserve_slot() {
   assert_eq!(table.len(), table.cap() as u32);
 }
 
+#[cfg(feature = "std")]
 #[test]
 fn reserve_slot_race() {
   static PERMITS: AtomicUsize = AtomicUsize::new(0);
@@ -192,7 +202,7 @@ fn undo_reservation_undoes_when_full_max() {
 #[test]
 fn acquire_slot() {
   let table: Table<usize, DefParams> = Table::new();
-  let mut indices: HashSet<usize> = HashSet::with_capacity(table.cap());
+  let mut indices: BTreeSet<usize> = BTreeSet::new();
 
   for _ in 0..table.cap() {
     let reserved: Permit<'_, usize, DefParams> = table.reserve_slot().unwrap();
@@ -291,8 +301,8 @@ fn generate_next_slot_uniqueness() {
   const GENERATIONS: usize = 10;
 
   let table: Table<usize, DefParams> = Table::new();
-  let mut indices: HashSet<usize> = HashSet::with_capacity(table.cap());
-  let mut uniques: HashSet<Detached> = HashSet::with_capacity(GENERATIONS * table.cap());
+  let mut indices: BTreeSet<usize> = BTreeSet::new();
+  let mut uniques: BTreeSet<Detached> = BTreeSet::new();
 
   for generation in 0..GENERATIONS {
     let gen_index: usize = generation * table.cap();
@@ -319,6 +329,7 @@ fn generate_next_slot_skips_reserved() {
   assert_ne!(value, RESERVED);
 }
 
+#[cfg(feature = "std")]
 #[test]
 fn slot_churn() {
   static PERMITS: AtomicUsize = AtomicUsize::new(0);
@@ -330,7 +341,7 @@ fn slot_churn() {
   let capacity: usize = table.cap();
 
   let mut threads: Vec<JoinHandle<Vec<usize>>> = Vec::with_capacity(THREADS);
-  let mut uniques: HashSet<usize> = HashSet::with_capacity(capacity);
+  let mut uniques: BTreeSet<usize> = BTreeSet::new();
 
   for _ in 0..THREADS {
     let barrier: Arc<Barrier> = Arc::clone(&barrier);
@@ -471,7 +482,7 @@ fn insert_beyond_capacity() {
 #[test]
 fn insert_unique_ids() {
   let table: Table<usize, DefParams> = Table::new();
-  let mut keys: HashSet<Detached> = HashSet::with_capacity(table.cap());
+  let mut keys: BTreeSet<Detached> = BTreeSet::new();
 
   for _ in 0..table.cap() {
     assert!(keys.insert(table.insert(123).unwrap()));
@@ -492,6 +503,7 @@ fn write_callback_correct_index() {
   assert_eq!(table.read(index, &guard), Some(index.into_bits()));
 }
 
+#[cfg(feature = "sdd")]
 #[test]
 fn remove() {
   let table: Table<usize, DefParams> = Table::new();
@@ -506,6 +518,7 @@ fn remove() {
   assert!(table.is_empty());
 }
 
+#[cfg(feature = "sdd")]
 #[test]
 fn remove_nonexistent() {
   let table: Table<usize, DefParams> = Table::new();
@@ -515,6 +528,7 @@ fn remove_nonexistent() {
   refute!(table.remove(index));
 }
 
+#[cfg(feature = "sdd")]
 #[test]
 fn remove_recycling() {
   let table: Table<usize, DefParams> = Table::new();
@@ -633,6 +647,7 @@ fn weak_keys_last_slot() {
   table.volatile.incr_entries();
 }
 
+#[cfg(feature = "sdd")]
 #[cfg_attr(miri, ignore)]
 #[test]
 fn weak_keys_full_max() {
@@ -661,6 +676,7 @@ fn drop_empty() {
   assert_eq!(DropMe::load(), 0);
 }
 
+#[cfg(feature = "sdd")]
 #[test]
 fn drop_half_full() {
   make_drop!(DropMe);
@@ -744,6 +760,7 @@ fn debug_weak_keys() {
   assert_eq!(debug, "WeakKeys(..)");
 }
 
+#[cfg(feature = "sdd")]
 #[test]
 fn min_capacity_ops() {
   let table: Table<usize, MinParams> = Table::new();
