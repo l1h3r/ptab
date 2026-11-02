@@ -32,8 +32,8 @@
 //! ```
 //! use ptab::{PTab, ConstParams};
 //!
-//! let table: PTab<u64, ConstParams<512>> = PTab::new();
-//! assert_eq!(table.capacity(), 512);
+//! let table: PTab<u64, ConstParams<1000>> = PTab::new();
+//! assert_eq!(table.capacity(), 1024);
 //! ```
 //!
 //! # Concurrency

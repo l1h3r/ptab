@@ -45,6 +45,11 @@ const _: () = assert!(
   "invalid params: `CACHE_LINE_SLOTS` must be a power of two",
 );
 
+const _: () = assert!(
+  Capacity::MIN.as_usize() >= CACHE_LINE_SLOTS,
+  "invalid params: `Capacity::MIN` must cover one cache line",
+);
+
 // -----------------------------------------------------------------------------
 // Configurable Params
 // -----------------------------------------------------------------------------
@@ -195,8 +200,8 @@ impl Params for DefaultParams {
 /// ```
 /// use ptab::{PTab, ConstParams};
 ///
-/// let table: PTab<String, ConstParams<500>> = PTab::new();
-/// assert_eq!(table.capacity(), 512);
+/// let table: PTab<String, ConstParams<1000>> = PTab::new();
+/// assert_eq!(table.capacity(), 1024);
 /// ```
 #[derive(Clone, Copy, Debug, Hash, PartialEq, Eq)]
 #[non_exhaustive]
@@ -219,7 +224,7 @@ impl<const N: usize> Params for ConstParams<N> {
 /// ```
 /// use ptab::Capacity;
 ///
-/// assert_eq!(Capacity::new(100).as_usize(), 128);
+/// assert_eq!(Capacity::new(1000).as_usize(), 1024);
 /// ```
 ///
 /// [MIN]: Self::MIN
@@ -232,7 +237,7 @@ const _: () = assert!(align_of::<Capacity>() == align_of::<usize>());
 const _: () = assert!(size_of::<Capacity>() == size_of::<usize>());
 
 impl Capacity {
-  /// The minimum supported capacity (2⁴ entries).
+  /// The minimum supported capacity (2¹⁰ entries).
   pub const MIN: Self = Self(CapacityEnum::MIN);
 
   /// The maximum supported capacity (2²⁷ entries).
@@ -251,7 +256,7 @@ impl Capacity {
   /// ```
   /// use ptab::Capacity;
   ///
-  /// assert_eq!(Capacity::new(100).as_usize(), 128);
+  /// assert_eq!(Capacity::new(1000).as_usize(), 1024);
   /// assert_eq!(Capacity::new(0), Capacity::MIN);
   /// assert_eq!(Capacity::new(usize::MAX), Capacity::MAX);
   /// ```
@@ -329,7 +334,7 @@ impl Capacity {
   /// ```
   /// use ptab::Capacity;
   ///
-  /// assert_eq!(Capacity::new(16).log2(), 4);
+  /// assert_eq!(Capacity::new(2048).log2(), 11);
   /// assert_eq!(Capacity::new(1024).log2(), 10);
   /// ```
   #[inline]
@@ -373,12 +378,6 @@ impl From<Capacity> for usize {
 #[derive(Copy, Clone, PartialEq, Eq)]
 #[repr(usize)]
 enum CapacityEnum {
-  _Capacity1Shl4 = 1 << 4,
-  _Capacity1Shl5 = 1 << 5,
-  _Capacity1Shl6 = 1 << 6,
-  _Capacity1Shl7 = 1 << 7,
-  _Capacity1Shl8 = 1 << 8,
-  _Capacity1Shl9 = 1 << 9,
   _Capacity1Shl10 = 1 << 10,
   _Capacity1Shl11 = 1 << 11,
   _Capacity1Shl12 = 1 << 12,
@@ -400,10 +399,10 @@ enum CapacityEnum {
 }
 
 impl CapacityEnum {
-  const MIN: Self = Self::_Capacity1Shl4;
+  const MIN: Self = Self::_Capacity1Shl10;
 
   #[cfg(miri)]
-  const MAX: Self = Self::_Capacity1Shl10;
+  const MAX: Self = Self::_Capacity1Shl11;
 
   #[cfg(all(not(miri), test))]
   const MAX: Self = Self::_Capacity1Shl16;
@@ -412,10 +411,10 @@ impl CapacityEnum {
   const MAX: Self = Self::_Capacity1Shl27;
 
   #[cfg(miri)]
-  const DEF: Self = Self::_Capacity1Shl5;
+  const DEF: Self = Self::_Capacity1Shl10;
 
   #[cfg(all(not(miri), test))]
-  const DEF: Self = Self::_Capacity1Shl10;
+  const DEF: Self = Self::_Capacity1Shl11;
 
   #[cfg(not(any(miri, test)))]
   const DEF: Self = Self::_Capacity1Shl20;

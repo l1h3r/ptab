@@ -66,7 +66,7 @@ fn capacity_log2() {
 
 #[test]
 fn capacity_debug() {
-  assert_eq!(format!("{:?}", Capacity::MIN), "16 (1 << 4)");
+  assert_eq!(format!("{:?}", Capacity::MIN), "1024 (1 << 10)");
 }
 
 #[test]

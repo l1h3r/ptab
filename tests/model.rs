@@ -7,12 +7,16 @@ mod model {
     pub use ::loom::thread;
     pub use ::loom::thread::JoinHandle;
 
+    const MAX_BRANCHES: usize = 20_000;
+
     #[inline]
     pub fn check<F>(f: F)
     where
       F: Fn() + Sync + Send + 'static,
     {
-      loom::model(f);
+      let mut builder: loom::model::Builder = loom::model::Builder::new();
+      builder.max_branches = MAX_BRANCHES;
+      builder.check(f);
     }
   }
 
