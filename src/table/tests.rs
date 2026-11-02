@@ -14,7 +14,7 @@ use crate::index::Detached;
 use crate::params::CACHE_LINE_SLOTS;
 use crate::params::Capacity;
 use crate::params::ConstParams;
-use crate::params::Params as _;
+use crate::params::Params;
 use crate::params::ParamsExt as _;
 use crate::reclaim::Atomic as _;
 use crate::sync::atomic::AtomicUsize;
@@ -145,6 +145,46 @@ fn reserve_slot_race() {
 
   assert_eq!(table.len(), table.cap() as u32);
   assert_eq!(table.cap(), PERMITS.load(Ordering::Relaxed));
+}
+
+fn undo_reservation_keeps_when_room<P: Params>() {
+  let table: Table<usize, P> = Table::new();
+  let length: u32 = P::LENGTH.as_u32();
+
+  table.volatile.entries.store(length - 1, Ordering::Relaxed);
+
+  assert!(table.undo_reservation(length + 1).is_some());
+  assert_eq!(table.volatile.entries.load(Ordering::Relaxed), length - 1);
+}
+
+fn undo_reservation_undoes_when_full<P: Params>() {
+  let table: Table<usize, P> = Table::new();
+  let length: u32 = P::LENGTH.as_u32();
+
+  table.volatile.entries.store(length + 1, Ordering::Relaxed);
+
+  assert!(table.undo_reservation(length + 1).is_none());
+  assert_eq!(table.volatile.entries.load(Ordering::Relaxed), length);
+}
+
+#[test]
+fn undo_reservation_keeps_when_room_def() {
+  undo_reservation_keeps_when_room::<DefParams>();
+}
+
+#[test]
+fn undo_reservation_keeps_when_room_max() {
+  undo_reservation_keeps_when_room::<MaxParams>();
+}
+
+#[test]
+fn undo_reservation_undoes_when_full_def() {
+  undo_reservation_undoes_when_full::<DefParams>();
+}
+
+#[test]
+fn undo_reservation_undoes_when_full_max() {
+  undo_reservation_undoes_when_full::<MaxParams>();
 }
 
 #[test]

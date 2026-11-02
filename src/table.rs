@@ -202,10 +202,17 @@ where
       return Some(Permit::new(self));
     }
 
-    // Table is full; undo the increment.
-    let mut current: u32 = prev.wrapping_add(1);
+    self.undo_reservation(prev.wrapping_add(1))
+  }
 
+  #[cold]
+  #[inline(never)]
+  fn undo_reservation(&self, mut current: u32) -> Option<Permit<'_, T, P>> {
     while let Err(next) = self.volatile.swap_entries(current, current.wrapping_sub(1)) {
+      if next <= P::LENGTH.as_u32() {
+        return Some(Permit::new(self));
+      }
+
       current = next;
     }
 
@@ -394,7 +401,7 @@ where
   fn swap_entries(&self, current: u32, updated: u32) -> Result<u32, u32> {
     self
       .entries
-      .compare_exchange_weak(current, updated, Release, Relaxed)
+      .compare_exchange(current, updated, Release, Relaxed)
   }
 
   #[inline]
