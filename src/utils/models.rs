@@ -1,5 +1,5 @@
 #[cfg(all(loom, shuttle))]
-compile_error!("expected one of `--cfg loom` or `--cfg shuttle`.");
+compile_error!("`--cfg loom` and `--cfg shuttle` are mutually exclusive");
 
 #[cfg(loom)]
 pub(crate) mod alloc {

@@ -28,8 +28,10 @@ impl CollectorWeak for Sdd {
 
   #[inline]
   fn flush() {
-    // sdd triggers reclamation after we've observed three new epochs; we
-    // observe one extra since we might lag behind the global value.
+    // Four new guards carry this thread three epochs past the one a value was
+    // retired in, even when it starts one epoch behind the global epoch.
+    //
+    // ref: sdd-4.8.11 src/guard.rs:47
     const EPOCH: usize = 4;
 
     for _ in 0..EPOCH {
@@ -78,8 +80,8 @@ impl<T> Atomic<T> for sdd::AtomicOwned<T> {
 
     let old: (Option<sdd::Owned<T>>, sdd::Tag) = self.swap((Some(value), NO_TAG), order);
 
-    debug_assert!(old.0.is_none(), "Atomic<T> is occupied!");
-    debug_assert!(old.1 == NO_TAG, "Atomic<T> is tagged!");
+    debug_assert!(old.0.is_none(), "`Atomic<T>` is occupied");
+    debug_assert!(old.1 == NO_TAG, "`Atomic<T>` is tagged");
 
     // SAFETY:
     // - Slot allocation guarantees the slot is empty before calling `write`.

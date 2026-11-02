@@ -66,9 +66,9 @@ macro_rules! make_drop {
   };
 }
 
-// ---------------------------------------------------------------------------
+// -----------------------------------------------------------------------------
 // Internals
-// ---------------------------------------------------------------------------
+// -----------------------------------------------------------------------------
 
 #[test]
 fn new_data_array() {
@@ -111,8 +111,6 @@ fn reserve_slot() {
   assert_eq!(table.len(), table.cap() as u32);
 }
 
-// Scenario: The table fills up and multiple threads race to claim slots.
-// Expected: We never hand out `Permit`s beyond the available capacity.
 #[test]
 fn reserve_slot_race() {
   static PERMITS: AtomicUsize = AtomicUsize::new(0);
@@ -225,12 +223,6 @@ fn generate_next_slot_skips_reserved() {
   assert_ne!(value, RESERVED);
 }
 
-// Scenario: The table fills up as multiple threads manipulate slots.
-// Expected:
-// - We never hand out `Permit`s beyond the available capacity.
-// - Every `Permit` is honored in `acquire_slot`.
-// - All keys are unique.
-// - The table count stays in bounds.
 #[test]
 fn slot_churn() {
   static PERMITS: AtomicUsize = AtomicUsize::new(0);
@@ -292,9 +284,9 @@ fn slot_churn() {
   assert_eq!(table.cap(), PERMITS.load(Ordering::Relaxed));
 }
 
-// ---------------------------------------------------------------------------
+// -----------------------------------------------------------------------------
 // API
-// ---------------------------------------------------------------------------
+// -----------------------------------------------------------------------------
 
 #[test]
 fn cap() {
@@ -320,8 +312,6 @@ fn len() {
   assert_eq!(table.len(), 0);
 }
 
-// Scenario: The table is temporarily above capacity due to concurrent writes.
-// Expected: The `len` never surpasses `cap`.
 #[test]
 fn len_clamp() {
   let table: Table<usize, DefParams> = Table::new();
@@ -548,8 +538,8 @@ fn drop_half_full() {
     assert!(table.remove(key));
   }
 
-  // Force garbage collection - this should always succeed
-  // for our use-case since we are single-threaded
+  // `Sdd::flush` frees the removed entries once no other thread is pinned in an
+  // older epoch.
   DefParams::flush();
 
   assert_eq!(DropMe::load(), table.cap() as u32 / 2);
@@ -606,8 +596,6 @@ fn debug_weak_keys() {
   assert_eq!(debug, "WeakKeys(..)");
 }
 
-// Scenario: The table has a single block due to min capacity.
-// Expected: Entry operations succeed.
 #[test]
 fn min_capacity_ops() {
   let table: Table<usize, MinParams> = Table::new();

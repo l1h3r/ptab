@@ -85,16 +85,12 @@ macro_rules! internal_index {
 // Detached Index
 // -----------------------------------------------------------------------------
 
-/// An opaque index identifying a table entry.
-///
-/// Returned by [`PTab::insert`] and [`PTab::write`]; used to access or remove
-/// entries.
+/// An opaque index naming a table entry, returned by [`PTab::insert`] and
+/// [`PTab::write`].
 ///
 /// # Generational Indices
 ///
-/// Each index contains a generational component that changes when a slot is
-/// reused. This helps mitigate the [ABA problem]: a stale index from a removed
-/// entry will not match a new entry occupying the same slot.
+/// An index carries a serial that changes when its slot is reused.
 ///
 /// # Examples
 ///
@@ -104,19 +100,11 @@ macro_rules! internal_index {
 /// let table: PTab<i32> = PTab::new();
 ///
 /// let idx = table.insert(42).unwrap();
-///
-/// // Access the entry by index
 /// assert_eq!(table.read(idx), Some(42));
-///
-/// // Indices are Copy
-/// let idx2 = idx;
-/// assert_eq!(table.read(idx2), Some(42));
 /// ```
 ///
-/// [`PTab`]: crate::public::PTab
 /// [`PTab::insert`]: crate::public::PTab::insert
 /// [`PTab::write`]: crate::public::PTab::write
-/// [ABA problem]: https://en.wikipedia.org/wiki/ABA_problem
 #[derive(Clone, Copy, Hash, PartialEq, Eq, PartialOrd, Ord)]
 #[repr(transparent)]
 pub struct Detached {
@@ -126,10 +114,8 @@ pub struct Detached {
 impl Detached {
   /// Creates a [`Detached`] index from its raw bit representation.
   ///
-  /// # Warning
-  ///
-  /// An arbitrary bit pattern may not correspond to a valid table entry; using
-  /// it is safe but will return [`None`] or `false` from table operations.
+  /// Table operations accept any `bits` and return [`None`] or `false` if it
+  /// names no entry.
   #[inline]
   pub const fn from_bits(bits: usize) -> Self {
     Self { bits }

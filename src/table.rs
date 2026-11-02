@@ -41,7 +41,7 @@ mod tests;
 // Implementation
 // -----------------------------------------------------------------------------
 
-/// Marker indicating a slot is reserved for an in-progress allocation.
+/// Marks a free-list entry whose index has been taken.
 const RESERVED: usize = usize::MAX;
 
 type Guard<P> = <<P as Params>::Collector as CollectorWeak>::Guard;
@@ -98,7 +98,8 @@ where
       max = max.wrapping_sub(1);
     }
 
-    // We may see an invalid `len` from a concurrent insert attempt; fix it here
+    // A failed `reserve_slot` holds `entries` above `max` until it undoes its
+    // increment.
     if len > max {
       return max;
     }
@@ -363,8 +364,7 @@ where
 {
   #[inline]
   fn new() -> Self {
-    // At `Capacity::MAX`, one slot is permanently reserved because we can't
-    // produce enough unique identifiers.
+    // At `Capacity::MAX` one slot stays reserved.
     Self {
       entries: AtomicU32::new(u32::from(P::LENGTH == Capacity::MAX)),
       next_id: AtomicU32::new(0),
@@ -491,20 +491,12 @@ where
 // Keys Iterator - Weak Snapshot
 // -----------------------------------------------------------------------------
 
-/// Iterator over indices in a [`PTab`] with weak snapshot semantics.
+/// An iterator over the indices of entries in a [`PTab`].
 ///
-/// `WeakKeys` performs a lock-free scan of the underlying table and yields
-/// [`Detached`] indices for entries observed as present.
+/// # Consistency
 ///
-/// # Consistency Model
-///
-/// This iterator is **weakly consistent**:
-///
-/// - It does not guarantee a consistent snapshot.
-/// - It does not prevent concurrent insertions or removals.
-/// - It never yields an index that was never fully initialized.
-/// - It may miss entries that were present when iteration began.
-/// - It may yield entries that are removed immediately afterward.
+/// Entries inserted or removed during iteration may or may not be yielded.
+/// Each yielded index named an entry at some point during iteration.
 ///
 /// [`PTab`]: crate::public::PTab
 pub struct WeakKeys<'table, T, P>

@@ -37,8 +37,7 @@ impl<T, P> Array<T, P>
 where
   P: Params + ?Sized,
 {
-  /// Creates an array where each element is produced by calling `init` with
-  /// that element’s index while walking forward through the array.
+  /// Creates an array, calling `init` with each index in ascending order.
   #[inline]
   pub(crate) fn new<F>(init: F) -> Self
   where

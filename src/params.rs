@@ -51,8 +51,7 @@ const _: () = assert!(
 
 /// Compile-time configuration for a [`PTab`].
 ///
-/// Allows compile-time customization of table parameters. The simplest approach
-/// is through [`ConstParams`]:
+/// [`ConstParams`] sets the capacity and keeps the default collector:
 ///
 /// ```
 /// use ptab::{PTab, ConstParams};
@@ -62,16 +61,10 @@ const _: () = assert!(
 ///
 /// [`PTab`]: crate::public::PTab
 pub trait Params {
-  /// The memory reclamation strategy used for removed entries.
-  ///
-  /// See [`Collector`] for more info.
-  ///
-  /// [`Collector`]: crate::reclaim::Collector
+  /// The collector for removed entries.
   type Collector: CollectorWeak;
 
-  /// The maximum number of entries the table can hold.
-  ///
-  /// See [`Capacity`] for more info.
+  /// The number of slots.
   const LENGTH: Capacity = DefaultParams::LENGTH;
 }
 
@@ -79,10 +72,7 @@ pub trait Params {
 // Configurable Params - Extensions
 // -----------------------------------------------------------------------------
 
-/// Derived parameters computed from [`Params`].
-///
-/// Automatically implemented for all [`Params`] types. Provides computed
-/// constants used internally.
+/// Constants derived from [`Params`].
 ///
 /// # Example
 ///
@@ -134,10 +124,7 @@ impl<P> ParamsExt for P where P: Params + ?Sized {}
 // Debug Params
 // -----------------------------------------------------------------------------
 
-/// A helper type for displaying [`Params`] configuration.
-///
-/// Returned by [`ParamsExt::debug`]; implements [`Debug`] to show all derived
-/// configuration values.
+/// The [`Debug`] view of a [`Params`], returned by [`ParamsExt::debug`].
 #[derive(Clone, Copy)]
 pub struct DebugParams<P>
 where
@@ -170,9 +157,8 @@ where
 // Default Params
 // -----------------------------------------------------------------------------
 
-/// The default table configuration with [`Capacity::DEF`] slots.
-///
-/// Used when creating a table without specifying a custom [`Params`] type.
+/// The default [`Params`], with [`Capacity::DEF`] slots and the `Sdd`
+/// collector. Without the `sdd` feature the collector is `Leak`.
 ///
 /// # Example
 ///
@@ -201,25 +187,14 @@ impl Params for DefaultParams {
 // Const-Generic Params
 // -----------------------------------------------------------------------------
 
-/// A [`Params`] implementation with compile-time configurable capacity.
-///
-/// The recommended way to create tables with custom capacities. The capacity
-/// `N` is rounded up to the nearest power of two and clamped to
-/// <code>[Capacity::MIN]..=[Capacity::MAX]</code>.
+/// [`Params`] with capacity `N`, rounded by [`Capacity::new`], and the
+/// [`DefaultParams`] collector.
 ///
 /// # Examples
 ///
 /// ```
 /// use ptab::{PTab, ConstParams};
 ///
-/// let table: PTab<String, ConstParams<512>> = PTab::new();
-/// assert_eq!(table.capacity(), 512);
-/// ```
-///
-/// ```
-/// use ptab::{PTab, ConstParams};
-///
-/// // Values are rounded up to powers of two
 /// let table: PTab<String, ConstParams<500>> = PTab::new();
 /// assert_eq!(table.capacity(), 512);
 /// ```
@@ -237,29 +212,14 @@ impl<const N: usize> Params for ConstParams<N> {
 // Capacity
 // -----------------------------------------------------------------------------
 
-/// A type storing a `usize` which is a power of two in the range
-/// <code>[MIN]..=[MAX]</code>, and thus represents a possible table capacity.
+/// A table capacity, always a power of two in <code>[MIN]..=[MAX]</code>.
 ///
 /// # Examples
 ///
 /// ```
 /// use ptab::Capacity;
 ///
-/// // Exact power of two
-/// let cap = Capacity::new(256);
-/// assert_eq!(cap.as_usize(), 256);
-///
-/// // Rounded up
-/// let cap = Capacity::new(100);
-/// assert_eq!(cap.as_usize(), 128);
-///
-/// // Clamped to minimum
-/// let cap = Capacity::new(1);
-/// assert_eq!(cap, Capacity::MIN);
-///
-/// // Clamped to maximum
-/// let cap = Capacity::new(usize::MAX);
-/// assert_eq!(cap, Capacity::MAX);
+/// assert_eq!(Capacity::new(100).as_usize(), 128);
 /// ```
 ///
 /// [MIN]: Self::MIN
@@ -293,6 +253,7 @@ impl Capacity {
   ///
   /// assert_eq!(Capacity::new(100).as_usize(), 128);
   /// assert_eq!(Capacity::new(0), Capacity::MIN);
+  /// assert_eq!(Capacity::new(usize::MAX), Capacity::MAX);
   /// ```
   ///
   /// [MIN]: Self::MIN
@@ -469,22 +430,18 @@ const fn derive_blocks<P>() -> NonZeroUsize
 where
   P: Params + ?Sized,
 {
-  // Determine the minimum valid size of table arrays.
   let Some(mem_bytes) = P::LENGTH.as_usize().checked_mul(size_of::<AtomicUsize>()) else {
     panic_for_blocks();
   };
 
-  // Round up so we have an even number of slots.
   let Some(mem_align) = mem_bytes.checked_next_multiple_of(CACHE_LINE) else {
     panic_for_blocks();
   };
 
-  // Make sure we don't overflow `isize::MAX`, otherwise the layout is invalid.
   if mem_align > isize::MAX as usize {
     panic_for_blocks();
   }
 
-  // Finally, compute the block count.
   let Some(blocks) = NonZeroUsize::new(mem_align / CACHE_LINE) else {
     panic_for_blocks();
   };

@@ -139,13 +139,11 @@ fn concrete_from_detached_matches_from_abstract() {
 
 #[test]
 fn cache_line_distribution() {
-  // Verify that consecutive base indices are distributed across cache lines
   each_capacity!('block: {
     if P::BLOCKS.get() <= 1 {
-      break 'block; // Skip solo blocks
+      break 'block;
     }
 
-    // First `CACHE_LINE_SLOTS` indices should map to different blocks
     let mut blocks: BTreeSet<usize> = BTreeSet::new();
 
     for index in 0..P::LENGTH.as_usize() {

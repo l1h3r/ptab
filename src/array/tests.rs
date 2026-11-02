@@ -4,7 +4,7 @@ use crate::params::CACHE_LINE;
 use crate::params::Params as _;
 use crate::utils::each_capacity;
 
-#[cfg_attr(loom, ignore = "loom does not run this test")]
+#[cfg_attr(loom, ignore = "needs `loom::model`")]
 #[test]
 fn alignment() {
   each_capacity!({
@@ -17,7 +17,7 @@ fn alignment() {
   });
 }
 
-#[cfg_attr(loom, ignore = "loom does not run this test")]
+#[cfg_attr(loom, ignore = "needs `loom::model`")]
 #[test]
 fn get() {
   each_capacity!({
@@ -31,7 +31,7 @@ fn get() {
   });
 }
 
-#[cfg_attr(loom, ignore = "loom does not run this test")]
+#[cfg_attr(loom, ignore = "needs `loom::model`")]
 #[test]
 fn as_slice() {
   each_capacity!({
@@ -47,7 +47,7 @@ fn as_slice() {
   });
 }
 
-#[cfg_attr(loom, ignore = "loom does not run this test")]
+#[cfg_attr(loom, ignore = "needs `loom::model`")]
 #[test]
 fn as_mut_slice() {
   each_capacity!({
