@@ -109,11 +109,17 @@ jobs:
       - run: ./bin/check shuttle
 
   kani:
-    name: Kani
+    name: Kani (${{matrix.line}})
     needs: pre_ci
     if: needs.pre_ci.outputs.continue
     runs-on: ubuntu-latest
     timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        line: [16, 32, 64, 128, 256]
+    env:
+      KANI_CACHE_LINES: ${{matrix.line}}
     steps:
       - uses: actions/checkout@v6
       - uses: model-checking/kani-github-action@v1
