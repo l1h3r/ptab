@@ -166,7 +166,7 @@ fn concrete_from_abstract_block_is_index_mod_blocks() {
     for value in 0..S {
       let slot: usize = Concrete::from_abstract(Abstract::<P>::new(value)).get();
 
-      assert_eq!(slot / CACHE_LINE_SLOTS, value % P::BLOCKS.get());
+      assert_eq!(slot / CACHE_LINE_SLOTS, value % P::BLOCKS);
     }
   });
 }

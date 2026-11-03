@@ -20,7 +20,7 @@
 #   MSRV              toolchain for msrv (default: 1.91.0)
 #   MIRI_SEEDS        -Zmiri-many-seeds range (default: 0..4)
 #   KANI_CACHE_LINES  cache lines for kani (default: 16 32 64 128 256)
-#   RUST_NIGHTLY      toolchain for miri, asan and tsan (default: nightly)
+#   RUST_NIGHTLY      toolchain for clippy, miri, asan and tsan (default: nightly)
 
 set -euo pipefail
 
@@ -82,12 +82,12 @@ run_clippy() {
   run() {
     local set="$1"
     shift
-    cargo clippy --all-targets --no-default-features --features "$set" "$@" -- -D warnings
+    cargo "+$RUST_NIGHTLY" clippy --all-targets --no-default-features --features "$set" "$@" -- -D warnings
     RUSTFLAGS="${RUSTFLAGS:-} --cfg loom" \
-      cargo clippy --all-targets --no-default-features --features "$set,loom" "$@" -- -D warnings
+      cargo "+$RUST_NIGHTLY" clippy --all-targets --no-default-features --features "$set,loom" "$@" -- -D warnings
     [[ $set == alloc ]] && return 0
     RUSTFLAGS="${RUSTFLAGS:-} --cfg shuttle" \
-      cargo clippy --all-targets --no-default-features --features "$set,shuttle" "$@" -- -D warnings
+      cargo "+$RUST_NIGHTLY" clippy --all-targets --no-default-features --features "$set,shuttle" "$@" -- -D warnings
   }
 
   each "alloc std sdd" "$@"

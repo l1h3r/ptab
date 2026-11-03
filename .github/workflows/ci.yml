@@ -64,7 +64,10 @@ jobs:
     steps:
       - uses: actions/checkout@v6
       - uses: dtolnay/rust-toolchain@clippy
+        id: rust
       - run: ./bin/check clippy
+        env:
+          RUST_NIGHTLY: ${{steps.rust.outputs.name}}
 
   test:
     name: Test (${{matrix.rust}})
@@ -113,8 +116,9 @@ jobs:
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v6
-      - uses: model-checking/kani-github-action@v0.68
+      - uses: model-checking/kani-github-action@v1
         with:
+          kani-version: 0.68.0
           command: ./bin/check
           args: kani
 
