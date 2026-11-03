@@ -21,6 +21,13 @@ use crate::sync::atomic::AtomicUsize;
 mod tests;
 
 // -----------------------------------------------------------------------------
+// Kani Proofs
+// -----------------------------------------------------------------------------
+
+#[cfg(kani)]
+mod proofs;
+
+// -----------------------------------------------------------------------------
 // Cache-line Properties
 // -----------------------------------------------------------------------------
 
@@ -233,8 +240,15 @@ impl<const N: usize> Params for ConstParams<N> {
 #[repr(transparent)]
 pub struct Capacity(CapacityEnum);
 
-const _: () = assert!(align_of::<Capacity>() == align_of::<usize>());
-const _: () = assert!(size_of::<Capacity>() == size_of::<usize>());
+const _: () = assert!(
+  align_of::<Capacity>() == align_of::<usize>(),
+  "`Capacity` must have the alignment of `usize`",
+);
+
+const _: () = assert!(
+  size_of::<Capacity>() == size_of::<usize>(),
+  "`Capacity` must have the size of `usize`",
+);
 
 impl Capacity {
   /// The minimum supported capacity (2¹⁰ entries).
@@ -343,7 +357,7 @@ impl Capacity {
   }
 
   #[inline]
-  const fn is_valid(value: usize) -> bool {
+  pub(crate) const fn is_valid(value: usize) -> bool {
     value.is_power_of_two() && value >= Self::MIN.as_usize() && value <= Self::MAX.as_usize()
   }
 }

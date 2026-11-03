@@ -24,6 +24,9 @@ rustdoc-args = [
   "--extern-html-root-url=std=https://doc.rust-lang.org",
 ]
 
+[package.metadata.kani.flags]
+default-unwind = "1"
+
 [dependencies]
 sdd = { version = "4.8", default-features = false, optional = true }
 
@@ -83,8 +86,12 @@ rust_2021_compatibility = { level = "deny", priority = -1 }
 rust_2024_compatibility = { level = "deny", priority = -1 }
 unused = { level = "deny", priority = -1 }
 
-# Standalone Lints
-unexpected_cfgs = { level = "warn", check-cfg = ["cfg(coverage,coverage_nightly,loom,shuttle)"] }
+[lints.rust.unexpected_cfgs]
+level = "warn"
+check-cfg = [
+  "cfg(coverage,coverage_nightly,kani,loom,shuttle)",
+  'cfg(ptab_cache_line, values("16", "32", "64", "128", "256"))',
+]
 
 # ------------------------------------------------------------------------------
 # Clippy Lints

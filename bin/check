@@ -6,24 +6,27 @@
 #   ./bin/check                    # every group, in the order below
 #   ./bin/check <group> [args...]  # one group; args go to each cargo call
 #
-# Groups: msrv rustfmt rustdoc clippy tests loom shuttle miri asan tsan
+# Groups: msrv rustfmt rustdoc clippy tests loom shuttle miri kani asan tsan
 #
 # Examples:
 #   ./bin/check loom insert                 # one model by name
 #   ./bin/check loom -- --nocapture         # see output
 #   ./bin/check miri --target i686-unknown-linux-gnu
+#   ./bin/check kani --harness spread
 #   ./bin/check asan --target x86_64-unknown-linux-gnuasan
 #   ./bin/check tsan --target x86_64-unknown-linux-gnutsan
 #
 # Environment:
-#   MSRV            toolchain for msrv (default: 1.91.0)
-#   MIRI_SEEDS      -Zmiri-many-seeds range (default: 0..4)
-#   RUST_NIGHTLY    toolchain for miri, asan and tsan (default: nightly)
+#   MSRV              toolchain for msrv (default: 1.91.0)
+#   MIRI_SEEDS        -Zmiri-many-seeds range (default: 0..4)
+#   KANI_CACHE_LINES  cache lines for kani (default: 16 32 64 128 256)
+#   RUST_NIGHTLY      toolchain for miri, asan and tsan (default: nightly)
 
 set -euo pipefail
 
 MSRV="${MSRV:-1.91.0}"
 MIRI_SEEDS="${MIRI_SEEDS:-0..4}"
+KANI_CACHE_LINES="${KANI_CACHE_LINES:-16 32 64 128 256}"
 RUST_NIGHTLY="${RUST_NIGHTLY:-nightly}"
 
 host_triple() {
@@ -142,6 +145,24 @@ run_miri() {
   each "alloc std sdd" "$@"
 }
 
+# Check - Kani
+
+run_kani() {
+  run() {
+    local set="$1"
+    shift
+    cargo kani -j --output-format terse --no-default-features --features "$set" "$@" 2>&1 |
+      awk '{ print }
+           /^ *\*\* [0-9]+ of [0-9]+ cover properties satisfied/ && $2 != $4 { failed = 1 }
+           END { if (failed) print "kani: a cover property is unsatisfiable" > "/dev/stderr"; exit failed }'
+  }
+
+  local line
+  for line in $KANI_CACHE_LINES; do
+    RUSTFLAGS="${RUSTFLAGS:+$RUSTFLAGS }--cfg ptab_cache_line=\"$line\"" each "alloc sdd" "$@"
+  done
+}
+
 # Check - Address Sanitizer
 
 run_asan() {
@@ -179,7 +200,7 @@ run_tsan() {
 
 # Dispatch
 
-ALL="msrv rustfmt rustdoc clippy tests loom shuttle miri asan tsan"
+ALL="msrv rustfmt rustdoc clippy tests loom shuttle miri kani asan tsan"
 
 if (($# == 0)); then
   for group in $ALL; do

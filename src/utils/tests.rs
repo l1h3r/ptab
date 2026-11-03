@@ -53,10 +53,32 @@ pub(crate) fn hash<T: Hash>(value: T) -> u64 {
 }
 
 // -----------------------------------------------------------------------------
+// Kani
+// -----------------------------------------------------------------------------
+
+#[cfg(kani)]
+pub(crate) fn any_capacity() -> Capacity {
+  Capacity::new(::kani::any())
+}
+
+#[cfg(kani)]
+pub(crate) fn any_valid_capacity() -> usize {
+  ::kani::any_where(|value: &usize| Capacity::is_valid(*value))
+}
+
+#[cfg(kani)]
+pub(crate) fn any_index<P>() -> usize
+where
+  P: Params,
+{
+  ::kani::any_where(|index: &usize| *index < P::LENGTH.as_usize())
+}
+
+// -----------------------------------------------------------------------------
 // Macros
 // -----------------------------------------------------------------------------
 
-#[cfg(test)]
+#[cfg(all(test, not(kani)))]
 macro_rules! each_capacity {
   ($expr:expr) => {
     $crate::utils::each_capacity!(
@@ -71,6 +93,28 @@ macro_rules! each_capacity {
       const S: usize = 1 << $bits;
       #[allow(dead_code, reason = "not every body names `P`")]
       type P = $crate::params::ConstParams<{ S }>;
+      $expr
+    })+
+  };
+}
+
+#[cfg(kani)]
+macro_rules! each_capacity {
+  ($expr:expr) => {
+    $crate::utils::each_capacity!(
+      @each $expr;
+      10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27,
+    );
+  };
+  (@each $expr:expr; $($bits:literal),+ $(,)?) => {
+    $({
+      const S: usize = 1 << $bits;
+      type P = $crate::params::ConstParams<{ S }>;
+      ::kani::assert(
+        <P as $crate::params::Params>::LENGTH.as_usize() == S,
+        concat!("LENGTH is 1 << ", stringify!($bits)),
+      );
+      ::kani::cover(true, concat!("capacity 1 << ", stringify!($bits)));
       $expr
     })+
   };

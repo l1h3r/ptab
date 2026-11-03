@@ -105,6 +105,19 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - run: ./bin/check shuttle
 
+  kani:
+    name: Kani
+    needs: pre_ci
+    if: needs.pre_ci.outputs.continue
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v6
+      - uses: model-checking/kani-github-action@v0.68
+        with:
+          command: ./bin/check
+          args: kani
+
   miri:
     name: Miri (${{matrix.arch}})
     needs: pre_ci

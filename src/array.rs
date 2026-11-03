@@ -20,6 +20,13 @@ use crate::params::ParamsExt;
 mod tests;
 
 // -----------------------------------------------------------------------------
+// Kani Proofs
+// -----------------------------------------------------------------------------
+
+#[cfg(kani)]
+mod proofs;
+
+// -----------------------------------------------------------------------------
 // Implementation
 // -----------------------------------------------------------------------------
 
@@ -93,7 +100,7 @@ where
   }
 
   /// Returns a raw pointer to the array's buffer.
-  #[cfg(all(test, not(loom)))]
+  #[cfg(all(any(test, kani), not(loom)))]
   #[inline]
   pub(crate) const fn as_ptr(&self) -> *const T {
     self.as_non_null().as_ptr()
@@ -106,7 +113,7 @@ where
   }
 
   /// Extracts a slice containing the entire array.
-  #[cfg(all(test, not(loom)))]
+  #[cfg(all(any(test, kani), not(loom)))]
   #[inline]
   pub(crate) const fn as_slice(&self) -> &[T] {
     // SAFETY:
