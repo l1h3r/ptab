@@ -408,12 +408,12 @@ where
 
   #[inline]
   fn fetch_next_id(&self) -> Abstract<P> {
-    Abstract::new(self.next_id.fetch_add(1, Relaxed) as usize)
+    Abstract::new(self.next_id.fetch_add(1, Acquire) as usize)
   }
 
   #[inline]
   fn fetch_free_id(&self) -> Abstract<P> {
-    Abstract::new(self.free_id.fetch_add(1, Relaxed) as usize)
+    Abstract::new(self.free_id.fetch_add(1, Release) as usize)
   }
 
   #[allow(dead_code, reason = "not used by loom/shuttle tests")]
