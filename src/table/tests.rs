@@ -169,6 +169,16 @@ fn undo_reservation_keeps_when_room<P: Params>() {
   assert_eq!(table.volatile.entries.load(Ordering::Relaxed), length - 1);
 }
 
+fn undo_reservation_keeps_at_length<P: Params>() {
+  let table: Table<usize, P> = Table::new();
+  let length: u32 = P::LENGTH.as_u32();
+
+  table.volatile.entries.store(length, Ordering::Relaxed);
+
+  assert!(table.undo_reservation(length + 1).is_some());
+  assert_eq!(table.volatile.entries.load(Ordering::Relaxed), length);
+}
+
 fn undo_reservation_undoes_when_full<P: Params>() {
   let table: Table<usize, P> = Table::new();
   let length: u32 = P::LENGTH.as_u32();
@@ -187,6 +197,16 @@ fn undo_reservation_keeps_when_room_def() {
 #[test]
 fn undo_reservation_keeps_when_room_max() {
   undo_reservation_keeps_when_room::<MaxParams>();
+}
+
+#[test]
+fn undo_reservation_keeps_at_length_def() {
+  undo_reservation_keeps_at_length::<DefParams>();
+}
+
+#[test]
+fn undo_reservation_keeps_at_length_max() {
+  undo_reservation_keeps_at_length::<MaxParams>();
 }
 
 #[test]
