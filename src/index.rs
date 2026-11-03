@@ -256,3 +256,23 @@ where
   debug_assert!(detached_to_abstract::<P>(value).get() == abstract_idx.get());
   value
 }
+
+/// Marks a free-list entry whose index a thread holds, all ones in the data
+/// width of a [`Detached`] index.
+pub(crate) const RESERVED: usize = usize::MAX >> 4;
+
+/// Returns the [`Abstract`] index that follows `abstract_idx` in its slot.
+#[inline]
+pub(crate) const fn abstract_next_serial<P>(abstract_idx: Abstract<P>) -> Abstract<P>
+where
+  P: Params + ?Sized,
+{
+  let length: usize = P::LENGTH.as_usize();
+  let mut value: usize = abstract_idx.get().wrapping_add(length) & RESERVED;
+
+  if value == RESERVED {
+    value = value.wrapping_add(length) & RESERVED;
+  }
+
+  Abstract::new(value)
+}

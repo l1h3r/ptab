@@ -17,6 +17,8 @@ use std::time::Instant;
 use crate::index::Abstract;
 use crate::index::Concrete;
 use crate::index::Detached;
+use crate::index::RESERVED;
+use crate::index::abstract_next_serial;
 use crate::params::CACHE_LINE_SLOTS;
 use crate::params::Capacity;
 use crate::params::ConstParams;
@@ -30,7 +32,6 @@ use crate::table::Atomic;
 use crate::table::DataArray;
 use crate::table::Guard;
 use crate::table::Permit;
-use crate::table::RESERVED;
 use crate::table::SlotArray;
 use crate::table::Table;
 use crate::utils::refute;
@@ -281,7 +282,7 @@ fn release_slot_fifo() {
     let mut expected: Vec<usize> = Vec::with_capacity(cap);
 
     while let Some(index) = acquired.pop() {
-      expected.push(table.generate_next_slot(index));
+      expected.push(abstract_next_serial(index).get());
       table.release_slot(index);
     }
 
@@ -305,19 +306,19 @@ fn release_slot_fifo() {
 }
 
 #[test]
-fn generate_next_slot() {
+fn next_serial_differs() {
   let table: Table<usize, DefParams> = Table::new();
 
   for index in 0..table.cap() {
     let old: Abstract<DefParams> = Abstract::new(index);
-    let new: Abstract<DefParams> = Abstract::new(table.generate_next_slot(old));
+    let new: Abstract<DefParams> = abstract_next_serial(old);
 
     assert_ne!(old, new);
   }
 }
 
 #[test]
-fn generate_next_slot_uniqueness() {
+fn next_serial_uniqueness() {
   const GENERATIONS: usize = 10;
 
   let table: Table<usize, DefParams> = Table::new();
@@ -329,7 +330,7 @@ fn generate_next_slot_uniqueness() {
 
     for index in 0..table.cap() {
       let old: Abstract<DefParams> = Abstract::new(gen_index + index);
-      let new: Abstract<DefParams> = Abstract::new(table.generate_next_slot(old));
+      let new: Abstract<DefParams> = abstract_next_serial(old);
       let _in: bool = indices.insert(Concrete::from_abstract(new).get());
 
       assert!(uniques.insert(Detached::from_abstract(new)));
@@ -338,15 +339,6 @@ fn generate_next_slot_uniqueness() {
 
   assert_eq!(uniques.len(), GENERATIONS * table.cap());
   assert_eq!(indices.len(), table.cap());
-}
-
-#[test]
-fn generate_next_slot_skips_reserved() {
-  let table: Table<usize, DefParams> = Table::new();
-  let index: Abstract<DefParams> = Abstract::new(RESERVED - table.cap());
-  let value: usize = table.generate_next_slot(index);
-
-  assert_ne!(value, RESERVED);
 }
 
 #[cfg(feature = "std")]

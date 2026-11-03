@@ -12,6 +12,8 @@ use crate::array::Array;
 use crate::index::Abstract;
 use crate::index::Concrete;
 use crate::index::Detached;
+use crate::index::RESERVED;
+use crate::index::abstract_next_serial;
 use crate::padded::CachePadded;
 use crate::params::CACHE_LINE_SLOTS;
 use crate::params::Capacity;
@@ -41,9 +43,6 @@ mod tests;
 // -----------------------------------------------------------------------------
 // Implementation
 // -----------------------------------------------------------------------------
-
-/// Marks a free-list entry whose index has been taken.
-const RESERVED: usize = usize::MAX;
 
 type Guard<P> = <<P as Params>::Collector as CollectorWeak>::Guard;
 
@@ -240,7 +239,7 @@ where
 
   #[inline]
   fn release_slot(&self, index: Abstract<P>) {
-    let data: usize = self.generate_next_slot(index);
+    let data: usize = abstract_next_serial(index).get();
 
     while self
       .readonly
@@ -251,19 +250,6 @@ where
     {}
 
     self.volatile.decr_entries();
-  }
-
-  #[inline]
-  const fn generate_next_slot(&self, index: Abstract<P>) -> usize {
-    let mut data: usize = index.get();
-
-    data = data.wrapping_add(P::LENGTH.as_usize());
-
-    if data == RESERVED {
-      data = data.wrapping_add(P::LENGTH.as_usize());
-    }
-
-    data
   }
 }
 

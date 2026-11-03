@@ -1,6 +1,8 @@
 use crate::index::Abstract;
 use crate::index::Concrete;
 use crate::index::Detached;
+use crate::index::RESERVED;
+use crate::index::abstract_next_serial;
 use crate::params::CACHE_LINE_SLOTS;
 use crate::params::Params as _;
 use crate::params::ParamsExt as _;
@@ -173,6 +175,46 @@ fn serial_number_preservation() {
         assert_eq!(abstract_idx.get(), serial + index);
         assert_eq!(abstract_idx, recovery_idx);
       }
+    }
+  });
+}
+
+#[test]
+fn reserved_is_all_ones_in_width() {
+  assert_eq!(RESERVED, (1 << (usize::BITS - 4)) - 1);
+}
+
+#[test]
+fn next_serial_skips_reserved() {
+  each_capacity!({
+    let length: usize = P::LENGTH.as_usize();
+    let index: Abstract<P> = Abstract::new(RESERVED - length);
+
+    assert_eq!(abstract_next_serial(index).get(), length - 1);
+  });
+}
+
+#[test]
+fn next_serial_wraps_at_width() {
+  each_capacity!({
+    let length: usize = P::LENGTH.as_usize();
+    let index: Abstract<P> = Abstract::new(RESERVED - (length - 1));
+
+    assert_eq!(abstract_next_serial(index).get(), 0);
+  });
+}
+
+#[test]
+fn next_serial_keeps_slot() {
+  each_capacity!({
+    let length: usize = P::LENGTH.as_usize();
+
+    for index in 0..length {
+      let old: Abstract<P> = Abstract::new(index);
+      let new: Abstract<P> = abstract_next_serial(old);
+
+      assert_eq!(Concrete::from_abstract(new), Concrete::from_abstract(old));
+      assert_eq!(new.get(), index + length);
     }
   });
 }
