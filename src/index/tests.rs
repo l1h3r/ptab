@@ -1,14 +1,47 @@
+use core::cmp::Ordering;
+
 use crate::index::Abstract;
 use crate::index::Concrete;
 use crate::index::Detached;
 use crate::index::RESERVED;
 use crate::index::abstract_next_serial;
 use crate::params::CACHE_LINE_SLOTS;
-use crate::params::Params as _;
+use crate::params::Params;
 use crate::params::ParamsExt as _;
 use crate::utils::each_capacity;
+use crate::utils::hash;
 use crate::utils::std::BTreeSet;
+use crate::utils::std::Vec;
 use crate::utils::std::format;
+use crate::utils::std::vec;
+
+fn samples<P>() -> [usize; 9]
+where
+  P: Params,
+{
+  let length: usize = P::LENGTH.as_usize();
+
+  [
+    0,
+    1,
+    length - 1,
+    length,
+    2 * length - 1,
+    RESERVED - length,
+    RESERVED - 1,
+    RESERVED,
+    usize::MAX,
+  ]
+}
+
+// -----------------------------------------------------------------------------
+// Abstract
+// -----------------------------------------------------------------------------
+
+#[test]
+fn abstract_get() {
+  assert_eq!(Abstract::<()>::new(123).get(), 123);
+}
 
 #[expect(clippy::clone_on_copy, reason = "exercises the `Clone` impl")]
 #[test]
@@ -20,6 +53,40 @@ fn abstract_clone_copy() {
   assert_eq!(a, b);
   assert_eq!(b, c);
   assert_eq!(c, a);
+}
+
+#[test]
+fn abstract_eq() {
+  assert_eq!(Abstract::<()>::new(123), Abstract::new(123));
+  assert_ne!(Abstract::<()>::new(123), Abstract::new(456));
+}
+
+#[test]
+fn abstract_debug() {
+  assert_eq!(format!("{:?}", Abstract::<()>::new(123)), "123");
+}
+
+#[test]
+fn abstract_round_trips_through_detached() {
+  each_capacity!({
+    for value in samples::<P>() {
+      let index: Abstract<P> = Abstract::new(value);
+
+      assert_eq!(
+        Abstract::from_detached(Detached::from_abstract(index)),
+        index
+      );
+    }
+  });
+}
+
+// -----------------------------------------------------------------------------
+// Concrete
+// -----------------------------------------------------------------------------
+
+#[test]
+fn concrete_get() {
+  assert_eq!(Concrete::<()>::new(123).get(), 123);
 }
 
 #[expect(clippy::clone_on_copy, reason = "exercises the `Clone` impl")]
@@ -35,91 +102,92 @@ fn concrete_clone_copy() {
 }
 
 #[test]
-fn abstract_debug_transparency() {
-  let value: usize = 123;
-  let index: Abstract<()> = Abstract::new(value);
-
-  assert_eq!(format!("{index:?}"), format!("{value:?}"));
+fn concrete_eq() {
+  assert_eq!(Concrete::<()>::new(123), Concrete::new(123));
+  assert_ne!(Concrete::<()>::new(123), Concrete::new(456));
 }
 
 #[test]
-fn concrete_debug_transparency() {
-  let value: usize = 123;
-  let index: Concrete<()> = Concrete::new(value);
-
-  assert_eq!(format!("{index:?}"), format!("{value:?}"));
+fn concrete_debug() {
+  assert_eq!(format!("{:?}", Concrete::<()>::new(123)), "123");
 }
 
 #[test]
-fn detached_debug_transparency() {
-  let value: usize = 123;
-  let index: Detached = Detached::from_bits(value);
-
-  assert_eq!(format!("{index:?}"), format!("{value:?}"));
-}
-
-#[test]
-fn detached_display_transparency() {
-  let value: usize = 123;
-  let index: Detached = Detached::from_bits(value);
-
-  assert_eq!(format!("{index}"), format!("{value}"));
-}
-
-#[test]
-fn detached_bits_roundtrip() {
-  let data: usize = usize::MAX >> 2;
-  let bits: usize = Detached::from_bits(data).into_bits();
-
-  assert_eq!(data, bits);
-}
-
-#[test]
-fn detached_decompose() {
+fn concrete_from_abstract_is_in_bounds() {
   each_capacity!({
-    for generation in 0..3 {
-      let offset: usize = generation * P::LENGTH.as_usize();
-
-      for index in 0..P::LENGTH.as_usize() {
-        let abstract_idx: Abstract<P> = Abstract::new(offset + index);
-        let detached_idx: Detached = Detached::from_abstract(abstract_idx);
-
-        let components: (u32, u32) = detached_idx.decompose::<P>();
-
-        assert_eq!(components.0 as usize, index);
-        assert_eq!(components.1 as usize, generation);
-      }
+    for value in samples::<P>() {
+      assert!(Concrete::from_abstract(Abstract::<P>::new(value)).get() < S);
     }
   });
 }
 
 #[test]
-fn abstract_to_concrete_covers_all_slots() {
+fn concrete_from_abstract_is_injective() {
   each_capacity!({
-    let mut used: BTreeSet<usize> = BTreeSet::new();
+    let mut seen: Vec<bool> = vec![false; S];
 
-    for index in 0..P::LENGTH.as_usize() {
-      let abstract_idx: Abstract<P> = Abstract::new(index);
-      let concrete_idx: Concrete<P> = Concrete::from_abstract(abstract_idx);
+    for value in 0..S {
+      let slot: usize = Concrete::from_abstract(Abstract::<P>::new(value)).get();
 
-      used.insert(concrete_idx.get());
+      assert!(!seen[slot]);
+      seen[slot] = true;
     }
-
-    assert_eq!(used.len(), P::LENGTH.as_usize());
-    assert_eq!(used.iter().min(), Some(&0));
-    assert_eq!(used.iter().max(), Some(&(P::LENGTH.as_usize() - 1)));
   });
 }
 
 #[test]
-fn abstract_to_detached_roundtrip() {
+fn concrete_from_abstract_is_surjective() {
   each_capacity!({
-    for index in 0..P::LENGTH.as_usize() {
-      let abstract_idx: Abstract<P> = Abstract::new(index);
-      let detached_idx: Detached = Detached::from_abstract(abstract_idx);
-      let recovery_idx: Abstract<P> = Abstract::from_detached(detached_idx);
+    let mut seen: Vec<bool> = vec![false; S];
 
-      assert_eq!(abstract_idx, recovery_idx);
+    for value in 0..S {
+      seen[Concrete::from_abstract(Abstract::<P>::new(value)).get()] = true;
+    }
+
+    assert!(seen.iter().all(|slot| *slot));
+  });
+}
+
+#[test]
+fn concrete_from_abstract_ignores_serial() {
+  each_capacity!({
+    for value in samples::<P>() {
+      assert_eq!(
+        Concrete::from_abstract(Abstract::<P>::new(value)),
+        Concrete::from_abstract(Abstract::new(value & P::ID_MASK_ENTRY)),
+      );
+    }
+  });
+}
+
+#[test]
+fn concrete_from_abstract_block_is_index_mod_blocks() {
+  each_capacity!({
+    for value in 0..S {
+      let slot: usize = Concrete::from_abstract(Abstract::<P>::new(value)).get();
+
+      assert_eq!(slot / CACHE_LINE_SLOTS, value % P::BLOCKS.get());
+    }
+  });
+}
+
+#[test]
+fn concrete_from_abstract_separates_neighbours() {
+  each_capacity!({
+    for value in samples::<P>() {
+      let this: usize = Concrete::from_abstract(Abstract::<P>::new(value)).get();
+      let next: usize = Concrete::from_abstract(Abstract::<P>::new(value.wrapping_add(1))).get();
+
+      assert_ne!(this / CACHE_LINE_SLOTS, next / CACHE_LINE_SLOTS);
+    }
+  });
+}
+
+#[test]
+fn concrete_from_detached_is_in_bounds() {
+  each_capacity!({
+    for bits in samples::<P>() {
+      assert!(Concrete::<P>::from_detached(Detached::from_bits(bits)).get() < S);
     }
   });
 }
@@ -127,57 +195,110 @@ fn abstract_to_detached_roundtrip() {
 #[test]
 fn concrete_from_detached_matches_from_abstract() {
   each_capacity!({
-    for index in 0..P::LENGTH.as_usize() {
-      let abstract_idx: Abstract<P> = Abstract::new(index);
-      let detached_idx: Detached = Detached::from_abstract(abstract_idx);
+    for bits in samples::<P>() {
+      let index: Detached = Detached::from_bits(bits);
 
-      let from_abstract: Concrete<P> = Concrete::from_abstract(abstract_idx);
-      let from_detached: Concrete<P> = Concrete::from_detached(detached_idx);
-
-      assert_eq!(from_abstract, from_detached);
+      assert_eq!(
+        Concrete::<P>::from_detached(index),
+        Concrete::from_abstract(Abstract::from_detached(index)),
+      );
     }
   });
 }
 
+// -----------------------------------------------------------------------------
+// Detached
+// -----------------------------------------------------------------------------
+
 #[test]
-fn cache_line_distribution() {
-  each_capacity!('block: {
-    if P::BLOCKS.get() <= 1 {
-      break 'block;
-    }
+fn detached_into_bits() {
+  assert_eq!(Detached::from_bits(123).into_bits(), 123);
+}
 
-    let mut blocks: BTreeSet<usize> = BTreeSet::new();
+#[expect(clippy::clone_on_copy, reason = "exercises the `Clone` impl")]
+#[test]
+fn detached_clone_copy() {
+  let a: Detached = Detached::from_bits(123);
+  let b: Detached = a.clone();
+  let c: Detached = b;
 
-    for index in 0..P::LENGTH.as_usize() {
-      let abstract_idx: Abstract<P> = Abstract::new(index);
-      let concrete_idx: Concrete<P> = Concrete::from_abstract(abstract_idx);
-
-      blocks.insert(concrete_idx.get() / CACHE_LINE_SLOTS);
-    }
-
-    assert_eq!(blocks.len(), P::BLOCKS.get());
-    assert_eq!(blocks.iter().min(), Some(&0));
-    assert_eq!(blocks.iter().max(), Some(&(P::BLOCKS.get() - 1)));
-  });
+  assert_eq!(a, b);
+  assert_eq!(b, c);
+  assert_eq!(c, a);
 }
 
 #[test]
-fn serial_number_preservation() {
+fn detached_eq() {
+  assert_eq!(Detached::from_bits(123), Detached::from_bits(123));
+  assert_ne!(Detached::from_bits(123), Detached::from_bits(456));
+}
+
+#[test]
+fn detached_hash() {
+  assert_eq!(
+    hash(Detached::from_bits(123)),
+    hash(Detached::from_bits(123))
+  );
+}
+
+#[test]
+fn detached_ord() {
+  assert_eq!(
+    Detached::from_bits(123).cmp(&Detached::from_bits(456)),
+    Ordering::Less
+  );
+  assert!(Detached::from_bits(123) < Detached::from_bits(456));
+}
+
+#[test]
+fn detached_debug() {
+  assert_eq!(format!("{:?}", Detached::from_bits(123)), "123");
+}
+
+#[test]
+fn detached_display() {
+  assert_eq!(format!("{}", Detached::from_bits(123)), "123");
+}
+
+#[test]
+fn detached_decompose_number() {
   each_capacity!({
-    for generation in 0..16 {
-      let serial: usize = generation * P::LENGTH.as_usize();
+    for value in samples::<P>() {
+      let index: Detached = Detached::from_abstract(Abstract::<P>::new(value));
 
-      for index in 0..P::LENGTH.as_usize() {
-        let abstract_idx: Abstract<P> = Abstract::new(serial + index);
-        let detached_idx: Detached = Detached::from_abstract(abstract_idx);
-        let recovery_idx: Abstract<P> = Abstract::from_detached(detached_idx);
-
-        assert_eq!(abstract_idx.get(), serial + index);
-        assert_eq!(abstract_idx, recovery_idx);
-      }
+      assert_eq!(index.decompose::<P>().0 as usize, value & P::ID_MASK_ENTRY);
     }
   });
 }
+
+#[test]
+fn detached_decompose_serial() {
+  each_capacity!({
+    for value in samples::<P>() {
+      let index: Detached = Detached::from_abstract(Abstract::<P>::new(value));
+
+      assert_eq!(index.decompose::<P>().1, (value >> P::ID_MASK_BITS) as u32);
+    }
+  });
+}
+
+#[test]
+fn detached_round_trips_through_abstract() {
+  each_capacity!({
+    for bits in samples::<P>() {
+      let index: Detached = Detached::from_bits(bits);
+
+      assert_eq!(
+        Detached::from_abstract(Abstract::<P>::from_detached(index)),
+        index
+      );
+    }
+  });
+}
+
+// -----------------------------------------------------------------------------
+// Next Serial
+// -----------------------------------------------------------------------------
 
 #[test]
 fn reserved_is_all_ones_in_width() {
@@ -185,36 +306,62 @@ fn reserved_is_all_ones_in_width() {
 }
 
 #[test]
-fn next_serial_skips_reserved() {
+fn abstract_next_serial_is_below_reserved() {
   each_capacity!({
-    let length: usize = P::LENGTH.as_usize();
-    let index: Abstract<P> = Abstract::new(RESERVED - length);
-
-    assert_eq!(abstract_next_serial(index).get(), length - 1);
+    for value in samples::<P>().into_iter().filter(|value| *value < RESERVED) {
+      assert!(abstract_next_serial(Abstract::<P>::new(value)).get() < RESERVED);
+    }
   });
 }
 
 #[test]
-fn next_serial_wraps_at_width() {
+fn abstract_next_serial_keeps_slot() {
   each_capacity!({
-    let length: usize = P::LENGTH.as_usize();
-    let index: Abstract<P> = Abstract::new(RESERVED - (length - 1));
+    for value in 0..S {
+      let index: Abstract<P> = Abstract::new(value);
+
+      assert_eq!(
+        Concrete::from_abstract(abstract_next_serial(index)),
+        Concrete::from_abstract(index),
+      );
+    }
+  });
+}
+
+#[test]
+fn abstract_next_serial_adds_length() {
+  each_capacity!({
+    let index: Abstract<P> = Abstract::new(RESERVED - S - 1);
+
+    assert_eq!(abstract_next_serial(index).get(), RESERVED - 1);
+  });
+}
+
+#[test]
+fn abstract_next_serial_skips_reserved() {
+  each_capacity!({
+    let index: Abstract<P> = Abstract::new(RESERVED - S);
+
+    assert_eq!(abstract_next_serial(index).get(), S - 1);
+  });
+}
+
+#[test]
+fn abstract_next_serial_wraps_at_width() {
+  each_capacity!({
+    let index: Abstract<P> = Abstract::new(RESERVED - (S - 1));
 
     assert_eq!(abstract_next_serial(index).get(), 0);
   });
 }
 
 #[test]
-fn next_serial_keeps_slot() {
+fn abstract_next_serial_is_injective() {
   each_capacity!({
-    let length: usize = P::LENGTH.as_usize();
+    let mut seen: BTreeSet<usize> = BTreeSet::new();
 
-    for index in 0..length {
-      let old: Abstract<P> = Abstract::new(index);
-      let new: Abstract<P> = abstract_next_serial(old);
-
-      assert_eq!(Concrete::from_abstract(new), Concrete::from_abstract(old));
-      assert_eq!(new.get(), index + length);
+    for value in (0..S).chain(RESERVED - S..RESERVED) {
+      assert!(seen.insert(abstract_next_serial(Abstract::<P>::new(value)).get()));
     }
   });
 }

@@ -21,7 +21,7 @@ mod remove_send {
   /// table.remove(idx);
   /// ```
   #[cfg(feature = "sdd")]
-  const REMOVE_NEEDS_SEND: () = ();
+  const PTAB_REMOVE_NEEDS_SEND: () = ();
 }
 
 #[cfg(doctest)]
@@ -109,6 +109,26 @@ mod unwind_safe {
 
 #[cfg(doctest)]
 mod sync_send {
+  /// `Rc<u32>` lacks `Send`.
+  ///
+  /// ```compile_fail,E0277
+  /// use std::rc::Rc;
+  /// use ptab::PTab;
+  ///
+  /// fn assert_send<T: Send>() {}
+  ///
+  /// assert_send::<PTab<Rc<u32>>>();
+  /// ```
+  ///
+  /// ```
+  /// use ptab::PTab;
+  ///
+  /// fn assert_send<T: Send>() {}
+  ///
+  /// assert_send::<PTab<u32>>();
+  /// ```
+  const PTAB_SEND: () = ();
+
   /// `MutexGuard<'static, u32>` lacks `Send`.
   ///
   /// ```compile_fail,E0277
@@ -128,4 +148,24 @@ mod sync_send {
   /// assert_sync::<PTab<u32>>();
   /// ```
   const PTAB_SYNC_NEEDS_SEND: () = ();
+
+  /// `Cell<u32>` lacks `Sync`.
+  ///
+  /// ```compile_fail,E0277
+  /// use std::cell::Cell;
+  /// use ptab::PTab;
+  ///
+  /// fn assert_sync<T: Sync>() {}
+  ///
+  /// assert_sync::<PTab<Cell<u32>>>();
+  /// ```
+  ///
+  /// ```
+  /// use ptab::PTab;
+  ///
+  /// fn assert_sync<T: Sync>() {}
+  ///
+  /// assert_sync::<PTab<u32>>();
+  /// ```
+  const PTAB_SYNC_NEEDS_SYNC: () = ();
 }

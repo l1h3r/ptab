@@ -21,7 +21,6 @@ use crate::index::RESERVED;
 use crate::index::abstract_next_serial;
 use crate::params::CACHE_LINE_SLOTS;
 use crate::params::Capacity;
-use crate::params::ConstParams;
 use crate::params::Params;
 use crate::params::ParamsExt as _;
 use crate::reclaim::Atomic as _;
@@ -34,7 +33,9 @@ use crate::table::Guard;
 use crate::table::Permit;
 use crate::table::SlotArray;
 use crate::table::Table;
-use crate::utils::refute;
+use crate::utils::DefParams;
+use crate::utils::MaxParams;
+use crate::utils::MinParams;
 use crate::utils::std::BTreeSet;
 use crate::utils::std::String;
 use crate::utils::std::Vec;
@@ -42,10 +43,6 @@ use crate::utils::std::format;
 
 #[allow(unused_imports, reason = "conditional")]
 use crate::reclaim::Shared as _;
-
-type DefParams = ConstParams<{ Capacity::DEF.as_usize() }>;
-type MaxParams = ConstParams<{ Capacity::MAX.as_usize() }>;
-type MinParams = ConstParams<{ Capacity::MIN.as_usize() }>;
 
 type ReadOnly<P = DefParams> = table::ReadOnly<u64, P>;
 
@@ -305,42 +302,6 @@ fn release_slot_fifo() {
   }
 }
 
-#[test]
-fn next_serial_differs() {
-  let table: Table<usize, DefParams> = Table::new();
-
-  for index in 0..table.cap() {
-    let old: Abstract<DefParams> = Abstract::new(index);
-    let new: Abstract<DefParams> = abstract_next_serial(old);
-
-    assert_ne!(old, new);
-  }
-}
-
-#[test]
-fn next_serial_uniqueness() {
-  const GENERATIONS: usize = 10;
-
-  let table: Table<usize, DefParams> = Table::new();
-  let mut indices: BTreeSet<usize> = BTreeSet::new();
-  let mut uniques: BTreeSet<Detached> = BTreeSet::new();
-
-  for generation in 0..GENERATIONS {
-    let gen_index: usize = generation * table.cap();
-
-    for index in 0..table.cap() {
-      let old: Abstract<DefParams> = Abstract::new(gen_index + index);
-      let new: Abstract<DefParams> = abstract_next_serial(old);
-      let _in: bool = indices.insert(Concrete::from_abstract(new).get());
-
-      assert!(uniques.insert(Detached::from_abstract(new)));
-    }
-  }
-
-  assert_eq!(uniques.len(), GENERATIONS * table.cap());
-  assert_eq!(indices.len(), table.cap());
-}
-
 #[cfg(feature = "std")]
 #[test]
 fn slot_churn() {
@@ -485,7 +446,7 @@ fn remove() {
   let index: Detached = table.insert(123).unwrap();
 
   assert_eq!(table.len(), 1);
-  refute!(table.is_empty());
+  assert!(!table.is_empty());
 
   assert!(table.remove(index));
 
@@ -500,7 +461,7 @@ fn remove_nonexistent() {
   let index: Detached = table.insert(123).unwrap();
 
   assert!(table.remove(index));
-  refute!(table.remove(index));
+  assert!(!table.remove(index));
 }
 
 #[cfg(feature = "sdd")]
@@ -564,7 +525,7 @@ fn exists_nonexistent() {
   let guard: Guard<DefParams> = DefParams::guard();
   let index: Detached = Detached::from_bits(123);
 
-  refute!(table.exists(index, &guard));
+  assert!(!table.exists(index, &guard));
 }
 
 #[test]
@@ -745,5 +706,5 @@ fn min_capacity_ops() {
   assert!(table.exists(index, &guard));
   assert_eq!(table.read(index, &guard), Some(123));
   assert!(table.remove(index));
-  refute!(table.exists(index, &guard));
+  assert!(!table.exists(index, &guard));
 }

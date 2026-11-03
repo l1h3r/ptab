@@ -35,9 +35,8 @@ use crate::sync::atomic::Ordering::Release;
 // Tests
 // -----------------------------------------------------------------------------
 
-#[cfg(not(any(loom, shuttle)))]
 #[cfg_attr(coverage_nightly, coverage(off))]
-#[cfg(test)]
+#[cfg(all(test, not(any(loom, shuttle))))]
 mod tests;
 
 // -----------------------------------------------------------------------------

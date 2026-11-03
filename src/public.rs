@@ -308,6 +308,16 @@ where
   }
 }
 
+/// # Examples
+///
+/// ```
+/// use ptab::PTab;
+///
+/// let table: PTab<i32> = PTab::new();
+/// let idx = table.insert(42).unwrap();
+///
+/// assert!(format!("{table:?}").contains(&format!("{idx:?}: 42")));
+/// ```
 impl<T, P> Debug for PTab<T, P>
 where
   T: Debug,
@@ -321,6 +331,14 @@ where
   }
 }
 
+/// # Examples
+///
+/// ```
+/// use ptab::PTab;
+///
+/// let table: PTab<i32> = PTab::default();
+/// assert!(table.is_empty());
+/// ```
 impl<T, P> Default for PTab<T, P>
 where
   P: Params + ?Sized,

@@ -16,7 +16,7 @@ use crate::params::ParamsExt;
 // -----------------------------------------------------------------------------
 
 #[cfg_attr(coverage_nightly, coverage(off))]
-#[cfg(test)]
+#[cfg(all(test, not(loom)))]
 mod tests;
 
 // -----------------------------------------------------------------------------
@@ -93,7 +93,7 @@ where
   }
 
   /// Returns a raw pointer to the array's buffer.
-  #[cfg(test)]
+  #[cfg(all(test, not(loom)))]
   #[inline]
   pub(crate) const fn as_ptr(&self) -> *const T {
     self.as_non_null().as_ptr()
@@ -106,7 +106,7 @@ where
   }
 
   /// Extracts a slice containing the entire array.
-  #[cfg(test)]
+  #[cfg(all(test, not(loom)))]
   #[inline]
   pub(crate) const fn as_slice(&self) -> &[T] {
     // SAFETY:

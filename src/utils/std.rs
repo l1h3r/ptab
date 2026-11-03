@@ -8,6 +8,7 @@ mod rust_alloc {
   pub(crate) use ::rust_alloc::collections::BTreeSet;
   pub(crate) use ::rust_alloc::format;
   pub(crate) use ::rust_alloc::string::String;
+  pub(crate) use ::rust_alloc::vec;
   pub(crate) use ::rust_alloc::vec::Vec;
 }
 
@@ -21,6 +22,7 @@ mod rust_alloc {
   pub(crate) use ::std::collections::BTreeSet;
   pub(crate) use ::std::format;
   pub(crate) use ::std::string::String;
+  pub(crate) use ::std::vec;
   pub(crate) use ::std::vec::Vec;
 }
 
