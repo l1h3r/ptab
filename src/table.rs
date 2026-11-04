@@ -52,7 +52,7 @@ type DataArray<T, P> = Array<Atomic<T, P>, P>;
 type SlotArray<P> = Array<AtomicUsize, P>;
 
 // -----------------------------------------------------------------------------
-// Table State
+// Table
 // -----------------------------------------------------------------------------
 
 #[repr(C)]
@@ -97,7 +97,7 @@ where
       max = max.wrapping_sub(1);
     }
 
-    // A failed `reserve_slot` holds `entries` above `max` until it undoes its
+    // A failed `reserve_slot` leaves `entries` past `max` until it undoes its
     // increment.
     if len > max {
       return max;
@@ -267,8 +267,8 @@ where
     for entry in self.readonly.data.as_mut_slice() {
       // SAFETY:
       // - `Drop` provides exclusive access via `&mut self`, so no concurrent
-      //   access can occur.
-      // - Each slot is dropped at most once.
+      //   access can occur
+      // - `Drop` drops each slot at most once
       if unsafe { entry.clear() } {
         count = count.wrapping_sub(1);
 
@@ -281,8 +281,8 @@ where
 }
 
 // SAFETY:
-// - `Table` may transfer ownership of entries across threads.
-// - This is only sound if `T: Send`.
+// - `Table` may transfer ownership of entries across threads
+// - this is only sound if `T: Send`
 unsafe impl<T, P> Send for Table<T, P>
 where
   T: Send,
@@ -291,10 +291,11 @@ where
 }
 
 // SAFETY:
-// - `Table` provides shared access to entries from multiple threads.
-// - This is only sound if `T: Sync`, as multiple shared references may be held.
+// - `Table` provides shared access to entries from more than one thread
+// - this is only sound if `T: Sync`, because more than one shared reference may
+//   exist at once
 // - `remove` and `Drop` drop a value on a thread other than the one that
-//   inserted it, which needs `T: Send`.
+//   inserted it, which needs `T: Send`
 unsafe impl<T, P> Sync for Table<T, P>
 where
   T: Send + Sync,
@@ -340,7 +341,7 @@ where
 }
 
 // -----------------------------------------------------------------------------
-// Volatile State
+// Volatile
 // -----------------------------------------------------------------------------
 
 #[repr(C)]
@@ -415,7 +416,7 @@ where
 }
 
 // -----------------------------------------------------------------------------
-// Read-only State
+// ReadOnly
 // -----------------------------------------------------------------------------
 
 #[repr(C)]
@@ -482,15 +483,24 @@ where
 }
 
 // -----------------------------------------------------------------------------
-// Keys Iterator - Weak Snapshot
+// WeakKeys
 // -----------------------------------------------------------------------------
 
 /// An iterator over the indices of entries in a [`PTab`].
 ///
-/// # Consistency
+/// The iterator may or may not yield an entry inserted or removed during
+/// iteration. Every index it yields matched an entry at some point during
+/// iteration.
 ///
-/// Entries inserted or removed during iteration may or may not be yielded.
-/// Each yielded index named an entry at some point during iteration.
+/// # Examples
+///
+/// ```
+/// use ptab::PTab;
+///
+/// let table: PTab<i32> = PTab::new();
+/// let index = table.insert(1).unwrap();
+/// assert_eq!(table.weak_keys().collect::<Vec<_>>(), vec![index]);
+/// ```
 ///
 /// [`PTab`]: crate::public::PTab
 pub struct WeakKeys<'table, T, P>
@@ -550,14 +560,15 @@ where
 
       let ptr: Shared<'_, T, P> = {
         // SAFETY:
-        // - `Concrete<P>` guarantees `concrete_idx.get() < P::LENGTH`.
-        // - `self.array` points to a contiguous allocation of `P::LENGTH` elements.
+        // - by `Concrete<P>`, `concrete_idx.get() < P::LENGTH`
+        // - `self.array` points to a contiguous allocation of `P::LENGTH`
+        //   elements
         let raw: NonNull<Atomic<T, P>> = unsafe { self.array.add(concrete_idx.get()) };
 
         // SAFETY:
-        // - `raw` was derived from a valid allocation.
-        // - The pointer is properly aligned for `Atomic<T>`.
-        // - The iterator only performs shared access.
+        // - `raw` derives from a valid allocation
+        // - the pointer is properly aligned for `Atomic<T>`
+        // - the iterator only performs shared access
         let data: &Atomic<T, P> = unsafe { raw.as_ref() };
 
         data.read(Acquire, guard)

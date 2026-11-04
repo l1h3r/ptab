@@ -36,7 +36,8 @@ mod model {
       shuttle::check_random(
         move || {
           f();
-          // SAFETY: `f` returned, so its tables have dropped and its threads have joined.
+          // SAFETY: `f` returned, so its tables have dropped and its threads
+          //         have joined.
           unsafe { ptab::__shuttle_free_atomics() };
         },
         ITERATIONS,

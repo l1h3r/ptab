@@ -638,8 +638,8 @@ fn table_drop_half_full() {
     assert!(table.remove(key));
   }
 
-  // `Sdd::flush` frees the removed entries once no other thread is pinned in an
-  // older epoch.
+  // `Sdd::flush` frees the removed entries once no other thread has a guard
+  // in an older epoch.
   let expected: u32 = table.cap() as u32 / 2;
   let deadline: Instant = Instant::now() + Duration::from_secs(10);
 

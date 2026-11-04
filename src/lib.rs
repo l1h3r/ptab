@@ -27,7 +27,7 @@
 //! # Configuration
 //!
 //! [`Params`] fixes the capacity and collector at compile time.
-//! [`ConstParams`] sets the capacity, rounded by [`Capacity::new`]:
+//! [`ConstParams`] sets the capacity, rounded by [`Capacity::new()`]:
 //!
 //! ```
 //! use ptab::{PTab, ConstParams};
@@ -40,30 +40,31 @@
 //!
 //! All [`PTab`] operations are lock-free.
 //!
-//! ```no_run
+//! ```
 //! use ptab::{PTab, ConstParams};
 //! use std::sync::Arc;
 //! use std::thread;
 //!
 //! let table: Arc<PTab<u64, ConstParams<1024>>> = Arc::new(PTab::new());
 //!
-//! let handles: Vec<_> = (0..4)
-//!   .map(|thread_id| {
-//!     let table = Arc::clone(&table);
-//!     thread::spawn(move || {
-//!       for i in 0..100 {
-//!         if let Some(idx) = table.insert(thread_id * 1000 + i) {
-//!           # #[cfg(feature = "sdd")]
-//!           table.remove(idx);
-//!         }
-//!       }
-//!     })
-//!   })
-//!   .collect();
+//! let worker = thread::spawn({
+//!   let table = Arc::clone(&table);
+//!   move || table.insert(1).unwrap()
+//! });
 //!
-//! for handle in handles {
-//!   handle.join().unwrap();
-//! }
+//! let index = worker.join().unwrap();
+//! assert_eq!(table.read(index), Some(1));
+//!
+//! # #[cfg(feature = "sdd")]
+//! # {
+//! let worker = thread::spawn({
+//!   let table = Arc::clone(&table);
+//!   move || table.remove(index)
+//! });
+//!
+//! assert!(worker.join().unwrap());
+//! assert_eq!(table.read(index), None);
+//! # }
 //! ```
 //!
 //! ## Memory Reclamation
@@ -73,12 +74,14 @@
 //!
 //! # Memory Layout
 //!
-//! Consecutive inserts land on different cache lines when the table spans more
+//! Consecutive inserts go to different cache lines when the table spans more
 //! than one cache line. See [`implementation`].
 //!
-//! [`Capacity::new`]: crate::params::Capacity::new
+//! [`Capacity::new()`]: crate::params::Capacity::new
 //! [`ConstParams`]: crate::params::ConstParams
 //! [`DefaultParams`]: crate::params::DefaultParams
+//! [`Detached`]: crate::index::Detached
+//! [`PTab`]: crate::public::PTab
 //! [`Params`]: crate::params::Params
 //! [`implementation`]: crate::implementation
 //! [`memory`]: crate::memory
@@ -110,11 +113,11 @@ pub(crate) use crate::utils::sync;
 ///
 /// # Safety
 ///
-/// After the call, no table made before it may run a method or drop.
+/// Tables made before the call must not run a method or drop after it.
 #[cfg(shuttle)]
 #[doc(hidden)]
 pub unsafe fn __shuttle_free_atomics() {
-  // SAFETY: the caller upholds the contract of `free_atomics`.
+  // SAFETY: the caller meets the contract of `free_atomics`.
   unsafe { sync::atomic::free_atomics() }
 }
 
@@ -138,7 +141,7 @@ pub mod config {
 pub mod memory {
   //! The collector traits and built-in collectors.
   //!
-  //! Needed only to implement [`Params`] or a collector.
+  //! Needed only for a custom [`Params`] or collector.
   //!
   //! [`Params`]: crate::params::Params
 

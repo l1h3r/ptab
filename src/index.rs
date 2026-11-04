@@ -15,7 +15,7 @@ use crate::params::ParamsExt;
 mod tests;
 
 // -----------------------------------------------------------------------------
-// Kani Proofs
+// Kani proofs
 // -----------------------------------------------------------------------------
 
 #[cfg(kani)]
@@ -89,15 +89,13 @@ macro_rules! internal_index {
 }
 
 // -----------------------------------------------------------------------------
-// Detached Index
+// Detached
 // -----------------------------------------------------------------------------
 
-/// An opaque index naming a table entry, returned by [`PTab::insert`] and
-/// [`PTab::write`].
+/// An opaque index for a table entry, returned by [`PTab::insert()`] and
+/// [`PTab::write()`].
 ///
-/// # Generational Indices
-///
-/// An index carries a serial that changes when its slot is reused.
+/// An index has a serial that changes when a later insert reuses its slot.
 ///
 /// # Examples
 ///
@@ -106,12 +104,12 @@ macro_rules! internal_index {
 ///
 /// let table: PTab<i32> = PTab::new();
 ///
-/// let idx = table.insert(42).unwrap();
-/// assert_eq!(table.read(idx), Some(42));
+/// let index = table.insert(42).unwrap();
+/// assert_eq!(table.read(index), Some(42));
 /// ```
 ///
-/// [`PTab::insert`]: crate::public::PTab::insert
-/// [`PTab::write`]: crate::public::PTab::write
+/// [`PTab::insert()`]: crate::public::PTab::insert
+/// [`PTab::write()`]: crate::public::PTab::write
 #[derive(Clone, Copy, Hash, PartialEq, Eq, PartialOrd, Ord)]
 #[repr(transparent)]
 pub struct Detached {
@@ -121,8 +119,18 @@ pub struct Detached {
 impl Detached {
   /// Creates a [`Detached`] index from its raw bit representation.
   ///
-  /// Table operations accept any `bits` and return [`None`] or `false` if it
-  /// names no entry.
+  /// Table operations accept any `bits` and return [`None`] or `false` when no
+  /// entry matches.
+  ///
+  /// # Examples
+  ///
+  /// ```
+  /// use ptab::{Detached, PTab};
+  ///
+  /// let table: PTab<i32> = PTab::new();
+  /// let index = Detached::from_bits(table.insert(1).unwrap().into_bits());
+  /// assert_eq!(table.read(index), Some(1));
+  /// ```
   #[inline]
   pub const fn from_bits(bits: usize) -> Self {
     Self { bits }
@@ -130,15 +138,35 @@ impl Detached {
 
   /// Returns the raw bit representation of this index.
   ///
-  /// See [`from_bits`] to reconstruct an index.
+  /// See [`from_bits()`] to reconstruct an index.
   ///
-  /// [`from_bits`]: Self::from_bits
+  /// # Examples
+  ///
+  /// ```
+  /// use ptab::{Detached, PTab};
+  ///
+  /// let table: PTab<i32> = PTab::new();
+  /// let index = table.insert(1).unwrap();
+  /// assert_eq!(Detached::from_bits(index.into_bits()), index);
+  /// ```
+  ///
+  /// [`from_bits()`]: Self::from_bits
   #[inline]
   pub const fn into_bits(self) -> usize {
     self.bits
   }
 
   /// Splits this index into its `(number, serial)` parts.
+  ///
+  /// # Examples
+  ///
+  /// ```
+  /// use ptab::{DefaultParams, PTab};
+  ///
+  /// let table: PTab<i32> = PTab::new();
+  /// let (number, _serial) = table.insert(1).unwrap().decompose::<DefaultParams>();
+  /// assert!(number < table.capacity());
+  /// ```
   #[inline]
   pub const fn decompose<P>(self) -> (usize, usize)
   where
@@ -178,7 +206,7 @@ impl Detached {
 }
 
 // -----------------------------------------------------------------------------
-// Abstract Index
+// Abstract
 // -----------------------------------------------------------------------------
 
 internal_index!(Abstract);
@@ -194,7 +222,7 @@ where
 }
 
 // -----------------------------------------------------------------------------
-// Concrete Index
+// Concrete
 // -----------------------------------------------------------------------------
 
 internal_index!(Concrete);
@@ -215,10 +243,10 @@ where
 }
 
 // -----------------------------------------------------------------------------
-// Index Mapping
+// Index mapping
 // -----------------------------------------------------------------------------
 
-/// Extracts the [`Abstract`] sequential index from a [`Detached`] index.
+/// Extracts the `Abstract` sequential index from a `Detached` index.
 #[inline]
 const fn detached_to_abstract<P>(detached: Detached) -> Abstract<P>
 where
@@ -230,7 +258,7 @@ where
   Abstract::new(value)
 }
 
-/// Extracts the [`Concrete`] cache-aware index from a [`Detached`] index.
+/// Extracts the `Concrete` cache-aware index from a `Detached` index.
 #[inline]
 const fn detached_to_concrete<P>(detached: Detached) -> Concrete<P>
 where
@@ -239,7 +267,7 @@ where
   Concrete::new(detached.into_bits() & P::ID_MASK_ENTRY)
 }
 
-/// Converts an [`Abstract`] sequential index to a [`Concrete`] cache-aware index.
+/// Converts an `Abstract` sequential index to a `Concrete` cache-aware index.
 #[inline]
 const fn abstract_to_concrete<P>(abstract_idx: Abstract<P>) -> Concrete<P>
 where
@@ -251,7 +279,7 @@ where
   Concrete::new(value)
 }
 
-/// Converts an [`Abstract`] sequential index to a [`Detached`] index.
+/// Converts an `Abstract` sequential index to a `Detached` index.
 #[inline]
 const fn abstract_to_detached<P>(abstract_idx: Abstract<P>) -> Detached
 where
@@ -264,11 +292,13 @@ where
   value
 }
 
-/// Marks a free-list entry whose index a thread holds, all ones in the data
+/// Marks a free-list entry whose index a thread has taken, all ones in the data
 /// width of a [`Detached`] index.
+///
+/// [`Detached`]: crate::index::Detached
 pub(crate) const RESERVED: usize = usize::MAX >> 4;
 
-/// Returns the [`Abstract`] index that follows `abstract_idx` in its slot.
+/// Returns the `Abstract` index that follows `abstract_idx` in its slot.
 #[inline]
 pub(crate) const fn abstract_next_serial<P>(abstract_idx: Abstract<P>) -> Abstract<P>
 where

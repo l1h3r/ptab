@@ -143,7 +143,7 @@ fn array_get_unchecked_rejects_out_of_bounds() {
   let array: Array<usize, MinParams> = indexed();
 
   // SAFETY: with debug assertions on, `get_unchecked` panics before the
-  // dereference for an index at or past `LENGTH`.
+  //         dereference for an index at or past `LENGTH`.
   let _ = unsafe { array.get_unchecked(MinParams::LENGTH.as_usize()) };
 }
 

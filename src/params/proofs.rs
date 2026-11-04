@@ -241,7 +241,7 @@ fn capacity_new_unchecked_rejects_invalid() {
   let value: usize = kani::any_where(|value: &usize| !Capacity::is_valid(*value));
 
   // SAFETY: with debug assertions on, `new_unchecked` panics before the
-  // transmute for a value `is_valid` rejects.
+  //         transmute for a value `is_valid` rejects.
   let _ = unsafe { Capacity::new_unchecked(value) };
 }
 

@@ -55,8 +55,9 @@ pub(crate) mod sync {
       inner: *mut ::shuttle::sync::atomic::AtomicUsize,
     }
 
-    // SAFETY: the pointee, a shuttle atomic, implements `Send` and `Sync` and
-    // stays allocated until `free_atomics`.
+    // SAFETY:
+    // - the pointee, a shuttle atomic, implements `Send` and `Sync`
+    // - the pointee remains allocated until `free_atomics`
     unsafe impl Send for AtomicUsize {}
     // SAFETY: as for `Send`.
     unsafe impl Sync for AtomicUsize {}
@@ -78,8 +79,10 @@ pub(crate) mod sync {
 
       #[inline]
       fn deref(&self) -> &Self::Target {
-        // SAFETY: `inner` came from `Box::into_raw` in `new`. Only `free_atomics`
-        // frees it, and its caller promises that no handle remains in use.
+        // SAFETY:
+        // - `inner` came from `Box::into_raw` in `new`
+        // - only `free_atomics` frees it, and its caller promises that no
+        //   handle remains in use
         unsafe { &*self.inner }
       }
     }
@@ -94,8 +97,9 @@ pub(crate) mod sync {
       let boxes: Vec<usize> = BOXES.with_borrow_mut(::core::mem::take);
 
       for address in boxes {
-        // SAFETY: `address` came from `Box::into_raw` in `new` and appears once
-        // in the list, so this frees it once.
+        // SAFETY:
+        // - `address` came from `Box::into_raw` in `new`
+        // - `address` appears once in the list, so this frees it once
         drop(unsafe { Box::from_raw(address as *mut ::shuttle::sync::atomic::AtomicUsize) });
       }
     }

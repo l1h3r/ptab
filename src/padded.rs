@@ -10,7 +10,7 @@ use core::ops::DerefMut;
 mod tests;
 
 // -----------------------------------------------------------------------------
-// Compile-time Checks
+// Compile-time checks
 // -----------------------------------------------------------------------------
 
 const CACHE_LINE_OVERRIDE: Option<usize> = if cfg!(ptab_cache_line = "16") {
@@ -40,7 +40,7 @@ const _: () = if let Some(size) = CACHE_LINE_OVERRIDE {
 
 /// Pads and aligns a value to the length of a cache line.
 ///
-/// Alignment varies by architecture; see [`CACHE_LINE`] for the effective size.
+/// Alignment varies by architecture. See [`CACHE_LINE`] for the effective size.
 ///
 /// Based on [`crossbeam-utils`].
 ///
@@ -105,10 +105,12 @@ pub(crate) struct CachePadded<T> {
   value: T,
 }
 
-// SAFETY: Transparent wrapper; inherits `Send` from `T`.
+// SAFETY: `CachePadded` is a transparent wrapper, so it inherits `Send` from
+//         `T`.
 unsafe impl<T: Send> Send for CachePadded<T> {}
 
-// SAFETY: Transparent wrapper; inherits `Sync` from `T`.
+// SAFETY: `CachePadded` is a transparent wrapper, so it inherits `Sync` from
+//         `T`.
 unsafe impl<T: Sync> Sync for CachePadded<T> {}
 
 impl<T> CachePadded<T> {

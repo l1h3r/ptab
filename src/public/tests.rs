@@ -9,16 +9,16 @@ mod remove_send {
   /// static M: Mutex<u8> = Mutex::new(0);
   ///
   /// let table: PTab<MutexGuard<'static, u8>> = PTab::new();
-  /// let idx = table.insert(M.lock().unwrap()).unwrap();
-  /// table.remove(idx);
+  /// let index = table.insert(M.lock().unwrap()).unwrap();
+  /// table.remove(index);
   /// ```
   ///
   /// ```
   /// use ptab::PTab;
   ///
   /// let table: PTab<u8> = PTab::new();
-  /// let idx = table.insert(0).unwrap();
-  /// table.remove(idx);
+  /// let index = table.insert(0).unwrap();
+  /// assert!(table.remove(index));
   /// ```
   #[cfg(feature = "sdd")]
   const PTAB_REMOVE_NEEDS_SEND: () = ();

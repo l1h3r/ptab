@@ -24,8 +24,8 @@ where
   P: Params,
 {
   let array: Array<Slot, P> = empty();
-  // SAFETY: `index` is below `P::LENGTH`, and the allocation holds `P::LENGTH`
-  // slots.
+  // SAFETY: `index` is below `P::LENGTH`, and the allocation has room for
+  //         `P::LENGTH` slots.
   unsafe { array.as_mut_ptr().add(index).write(MaybeUninit::new(value)) };
   array
 }
@@ -105,7 +105,7 @@ fn array_as_mut_slice_writes_slot() {
 
   array.as_mut_slice()[index].write(value);
 
-  // SAFETY: the write above initialized slot `index`.
+  // SAFETY: the write in this proof initialized slot `index`.
   assert!(unsafe { array.get(Concrete::new(index)).assume_init_read() } == value);
 }
 
@@ -126,7 +126,7 @@ fn array_get_unchecked_returns_slot() {
   let array: Array<Slot, MinParams> = written(index, value);
 
   // SAFETY: `index` is below `MinParams::LENGTH`, and `written` initialized
-  // slot `index`.
+  //         slot `index`.
   assert!(unsafe { array.get_unchecked(index).assume_init_read() } == value);
 }
 
@@ -137,7 +137,7 @@ fn array_get_unchecked_rejects_out_of_bounds() {
   let index: usize = kani::any_where(|index: &usize| *index >= MinParams::LENGTH.as_usize());
 
   // SAFETY: with debug assertions on, `get_unchecked` panics before the
-  // dereference for an index at or past `LENGTH`.
+  //         dereference for an index at or past `LENGTH`.
   let _ = unsafe { array.get_unchecked(index) };
 }
 

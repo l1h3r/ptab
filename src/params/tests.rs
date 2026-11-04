@@ -293,7 +293,7 @@ fn capacity_new_unchecked() {
 #[should_panic(expected = "Capacity::new_unchecked requires a valid value")]
 fn capacity_new_unchecked_rejects_invalid() {
   // SAFETY: with debug assertions on, `new_unchecked` panics before the
-  // transmute for a value that is not a power of two.
+  //         transmute for a value other than a power of two.
   let _ = unsafe { Capacity::new_unchecked(3) };
 }
 

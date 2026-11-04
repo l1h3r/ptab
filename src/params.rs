@@ -21,20 +21,20 @@ use crate::sync::atomic::AtomicUsize;
 mod tests;
 
 // -----------------------------------------------------------------------------
-// Kani Proofs
+// Kani proofs
 // -----------------------------------------------------------------------------
 
 #[cfg(kani)]
 mod proofs;
 
 // -----------------------------------------------------------------------------
-// Cache-line Properties
+// Cache-line properties
 // -----------------------------------------------------------------------------
 
 /// The size of a cache line in bytes.
 pub const CACHE_LINE: usize = size_of::<CachePadded<u8>>();
 
-/// The number of table slots that fit in a single cache line.
+/// The number of table slots that fit in one cache line.
 pub const CACHE_LINE_SLOTS: usize = CACHE_LINE / size_of::<AtomicUsize>();
 
 const _: () = assert!(
@@ -58,12 +58,13 @@ const _: () = assert!(
 );
 
 // -----------------------------------------------------------------------------
-// Configurable Params
+// Params
 // -----------------------------------------------------------------------------
 
 /// Compile-time configuration for a [`PTab`].
 ///
-/// [`ConstParams`] sets the capacity and keeps the default collector:
+/// [`ConstParams`] sets the capacity and takes the collector of
+/// [`DefaultParams`]:
 ///
 /// ```
 /// use ptab::{PTab, ConstParams};
@@ -71,6 +72,24 @@ const _: () = assert!(
 /// type MyTable<T> = PTab<T, ConstParams<8192>>;
 /// ```
 ///
+/// # Examples
+///
+/// ```
+/// use ptab::{Capacity, DefaultParams, PTab, Params};
+///
+/// struct Small;
+///
+/// impl Params for Small {
+///   type Collector = <DefaultParams as Params>::Collector;
+///   const LENGTH: Capacity = Capacity::MIN;
+/// }
+///
+/// let table: PTab<u8, Small> = PTab::new();
+/// assert_eq!(table.capacity(), 1024);
+/// ```
+///
+/// [`ConstParams`]: crate::params::ConstParams
+/// [`DefaultParams`]: crate::params::DefaultParams
 /// [`PTab`]: crate::public::PTab
 pub trait Params {
   /// The collector for removed entries.
@@ -81,18 +100,20 @@ pub trait Params {
 }
 
 // -----------------------------------------------------------------------------
-// Configurable Params - Extensions
+// ParamsExt
 // -----------------------------------------------------------------------------
 
 /// Constants derived from [`Params`].
 ///
-/// # Example
+/// # Examples
 ///
 /// ```
 /// use ptab::{config::ParamsExt, ConstParams};
 ///
-/// println!("{:#?}", <ConstParams<1024> as ParamsExt>::debug());
+/// assert_eq!(<ConstParams<1024> as ParamsExt>::MEMORY, 1024 * size_of::<usize>());
 /// ```
+///
+/// [`Params`]: crate::params::Params
 pub trait ParamsExt: Params + Sealed {
   const BLOCKS: NonZeroUsize = derive_blocks::<Self>();
   const LAYOUT: Layout = derive_layout::<Self>();
@@ -133,10 +154,24 @@ impl<P> Sealed for P where P: Params + ?Sized {}
 impl<P> ParamsExt for P where P: Params + ?Sized {}
 
 // -----------------------------------------------------------------------------
-// Debug Params
+// DebugParams
 // -----------------------------------------------------------------------------
 
-/// The [`Debug`] view of a [`Params`], returned by [`ParamsExt::debug`].
+/// A [`Debug`] view of a [`Params`], returned by [`ParamsExt::debug()`].
+///
+/// # Examples
+///
+/// ```
+/// use ptab::config::ParamsExt;
+/// use ptab::ConstParams;
+///
+/// let params = ConstParams::<1024>::debug();
+/// assert!(format!("{params:?}").contains("LENGTH"));
+/// ```
+///
+/// [`Debug`]: core::fmt::Debug
+/// [`Params`]: crate::params::Params
+/// [`ParamsExt::debug()`]: crate::params::ParamsExt::debug
 #[derive(Clone, Copy)]
 pub struct DebugParams<P>
 where
@@ -166,21 +201,25 @@ where
 }
 
 // -----------------------------------------------------------------------------
-// Default Params
+// DefaultParams
 // -----------------------------------------------------------------------------
 
-/// The default [`Params`], with [`Capacity::DEF`] slots and the `Sdd`
-/// collector. Without the `sdd` feature the collector is `Leak`.
+/// A [`Params`] with [`Capacity::DEF`] slots and the `Sdd` collector, the
+/// default for [`PTab`]. Without the `sdd` feature the collector is `Leak`.
 ///
-/// # Example
+/// # Examples
 ///
 /// ```
 /// use ptab::{PTab, DefaultParams};
 ///
-/// // These are equivalent:
 /// let table1: PTab<u64> = PTab::new();
 /// let table2: PTab<u64, DefaultParams> = PTab::new();
+/// assert_eq!(table1.capacity(), table2.capacity());
 /// ```
+///
+/// [`Capacity::DEF`]: crate::params::Capacity::DEF
+/// [`Params`]: crate::params::Params
+/// [`PTab`]: crate::public::PTab
 #[derive(Clone, Copy)]
 #[non_exhaustive]
 pub struct DefaultParams;
@@ -196,10 +235,10 @@ impl Params for DefaultParams {
 }
 
 // -----------------------------------------------------------------------------
-// Const-Generic Params
+// ConstParams
 // -----------------------------------------------------------------------------
 
-/// [`Params`] with capacity `N`, rounded by [`Capacity::new`], and the
+/// A [`Params`] with capacity `N`, rounded by [`Capacity::new()`], and the
 /// [`DefaultParams`] collector.
 ///
 /// # Examples
@@ -210,6 +249,10 @@ impl Params for DefaultParams {
 /// let table: PTab<String, ConstParams<1000>> = PTab::new();
 /// assert_eq!(table.capacity(), 1024);
 /// ```
+///
+/// [`Capacity::new()`]: crate::params::Capacity::new
+/// [`DefaultParams`]: crate::params::DefaultParams
+/// [`Params`]: crate::params::Params
 #[derive(Clone, Copy, Debug, Hash, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct ConstParams<const N: usize>;
@@ -224,7 +267,7 @@ impl<const N: usize> Params for ConstParams<N> {
 // Capacity
 // -----------------------------------------------------------------------------
 
-/// A table capacity, always a power of two in <code>[MIN]..=[MAX]</code>.
+/// A table capacity, always a power of two in [`MIN`]`..=`[`MAX`].
 ///
 /// # Examples
 ///
@@ -234,8 +277,8 @@ impl<const N: usize> Params for ConstParams<N> {
 /// assert_eq!(Capacity::new(1000).as_usize(), 1024);
 /// ```
 ///
-/// [MIN]: Self::MIN
-/// [MAX]: Self::MAX
+/// [`MIN`]: Self::MIN
+/// [`MAX`]: Self::MAX
 #[derive(Copy, Clone, PartialEq, Eq)]
 #[repr(transparent)]
 pub struct Capacity(CapacityEnum);
@@ -251,10 +294,10 @@ const _: () = assert!(
 );
 
 impl Capacity {
-  /// The minimum supported capacity (2¹⁰ entries).
+  /// The smallest supported capacity (2¹⁰ entries).
   pub const MIN: Self = Self(CapacityEnum::MIN);
 
-  /// The maximum supported capacity (2²⁷ entries).
+  /// The largest supported capacity (2²⁷ entries).
   pub const MAX: Self = Self(CapacityEnum::MAX);
 
   /// The default capacity (2²⁰ entries).
@@ -263,7 +306,7 @@ impl Capacity {
   /// Creates a `Capacity` from a `usize`.
   ///
   /// Rounds up to the nearest power of two and clamps to
-  /// <code>[MIN]..=[MAX]</code>.
+  /// [`MIN`]`..=`[`MAX`].
   ///
   /// # Examples
   ///
@@ -275,8 +318,8 @@ impl Capacity {
   /// assert_eq!(Capacity::new(usize::MAX), Capacity::MAX);
   /// ```
   ///
-  /// [MIN]: Self::MIN
-  /// [MAX]: Self::MAX
+  /// [`MIN`]: Self::MIN
+  /// [`MAX`]: Self::MAX
   #[inline]
   pub const fn new(value: usize) -> Self {
     let Some(capacity) = value.checked_next_power_of_two() else {
@@ -289,9 +332,10 @@ impl Capacity {
       Self::MAX
     } else {
       // SAFETY:
-      // - `capacity` was produced by `checked_next_power_of_two`, so it is a
-      //   power of two.
-      // - The bounds checks above ensure `Self::MIN <= capacity <= Self::MAX`.
+      // - `checked_next_power_of_two` produced `capacity`, so `capacity` is a
+      //   power of two
+      // - the bounds checks before this line make `Self::MIN <= capacity <=
+      //   Self::MAX` true
       unsafe { Self::new_unchecked(capacity) }
     }
   }
@@ -300,10 +344,20 @@ impl Capacity {
   ///
   /// # Safety
   ///
-  /// `capacity` must be a power of two in the range <code>[MIN]..=[MAX]</code>.
+  /// `capacity` must be a power of two in the range [`MIN`]`..=`[`MAX`].
   ///
-  /// [MIN]: Self::MIN
-  /// [MAX]: Self::MAX
+  /// # Examples
+  ///
+  /// ```
+  /// use ptab::Capacity;
+  ///
+  /// // SAFETY: 1024 is a power of two in `MIN..=MAX`.
+  /// let capacity = unsafe { Capacity::new_unchecked(1024) };
+  /// assert_eq!(capacity, Capacity::MIN);
+  /// ```
+  ///
+  /// [`MIN`]: Self::MIN
+  /// [`MAX`]: Self::MAX
   #[inline]
   pub const unsafe fn new_unchecked(capacity: usize) -> Self {
     debug_assert!(
@@ -312,30 +366,56 @@ impl Capacity {
     );
 
     // SAFETY:
-    // - The caller guarantees that `capacity` is a power of two in the range
-    //   `[Self::MIN, Self::MAX]`.
-    // - `Capacity` has the same size and alignment as `usize`.
+    // - the caller promises that `capacity` is a power of two in the range
+    //   `[Self::MIN, Self::MAX]`
+    // - `Capacity` has the same size and alignment as `usize`
     unsafe { mem::transmute::<usize, Self>(capacity) }
   }
 
   /// Returns the capacity as a [`u32`].
+  ///
+  /// # Examples
+  ///
+  /// ```
+  /// use ptab::Capacity;
+  ///
+  /// assert_eq!(Capacity::MIN.as_u32(), 1024);
+  /// ```
   #[inline]
   pub const fn as_u32(self) -> u32 {
     self.0 as u32
   }
 
   /// Returns the capacity as a [`usize`].
+  ///
+  /// # Examples
+  ///
+  /// ```
+  /// use ptab::Capacity;
+  ///
+  /// assert_eq!(Capacity::new(2048).as_usize(), 2048);
+  /// ```
   #[inline]
   pub const fn as_usize(self) -> usize {
     self.0 as usize
   }
 
   /// Returns the capacity as a [`NonZeroUsize`].
+  ///
+  /// # Examples
+  ///
+  /// ```
+  /// use ptab::Capacity;
+  ///
+  /// assert_eq!(Capacity::new(2048).as_nonzero().get(), 2048);
+  /// ```
+  ///
+  /// [`NonZeroUsize`]: core::num::NonZeroUsize
   #[inline]
   pub const fn as_nonzero(self) -> NonZeroUsize {
     // SAFETY:
-    // - All valid `Capacity` values are non-zero powers of two.
-    // - `Capacity` has the same size and alignment as `usize`.
+    // - all valid `Capacity` values are non-zero powers of two
+    // - `Capacity` has the same size and alignment as `usize`
     unsafe { mem::transmute::<Self, NonZeroUsize>(self) }
   }
 
@@ -435,7 +515,7 @@ impl CapacityEnum {
 }
 
 // -----------------------------------------------------------------------------
-// Misc. Utilities
+// Misc utilities
 // -----------------------------------------------------------------------------
 
 #[inline]
@@ -473,9 +553,9 @@ where
   );
 
   // SAFETY:
-  // - `P::MEMORY != 0` (asserted above).
-  // - `CACHE_LINE` is a power of two, so it is a valid alignment.
-  // - `P::MEMORY <= isize::MAX`, guaranteed by `derive_blocks`.
+  // - `P::MEMORY != 0` by the `assert!` in this function
+  // - `CACHE_LINE` is a power of two, so `CACHE_LINE` is a valid alignment
+  // - `P::MEMORY <= isize::MAX` by `derive_blocks`
   unsafe { Layout::from_size_align_unchecked(P::MEMORY, CACHE_LINE) }
 }
 

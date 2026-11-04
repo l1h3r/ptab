@@ -34,8 +34,8 @@ mod tests;
 ///
 /// let table: PTab<i32> = PTab::new();
 ///
-/// let idx = table.insert(42).unwrap();
-/// assert_eq!(table.with(idx, |&v| v), Some(42));
+/// let index = table.insert(42).unwrap();
+/// assert_eq!(table.with(index, |&v| v), Some(42));
 /// ```
 ///
 /// [crate-level documentation]: crate
@@ -68,7 +68,7 @@ where
     }
   }
 
-  /// Returns the maximum number of entries the table can hold.
+  /// Returns the number of slots in the table.
   ///
   /// # Examples
   ///
@@ -83,7 +83,7 @@ where
     self.inner.cap()
   }
 
-  /// Returns the number of entries currently in the table.
+  /// Returns the number of entries in the table.
   ///
   /// The result may be stale on return.
   ///
@@ -134,8 +134,8 @@ where
   ///
   /// let table: PTab<&str> = PTab::new();
   ///
-  /// let idx = table.insert("hello").unwrap();
-  /// assert!(table.exists(idx));
+  /// let index = table.insert("hello").unwrap();
+  /// assert!(table.exists(index));
   /// ```
   ///
   /// [`write()`]: Self::write
@@ -164,11 +164,11 @@ where
   ///
   /// let table: PTab<Process> = PTab::new();
   ///
-  /// let idx = table.write(|slot, id| {
+  /// let index = table.write(|slot, id| {
   ///   slot.write(Process { id, data: 42 });
   /// }).unwrap();
   ///
-  /// table.with(idx, |proc| assert_eq!(proc.id, idx));
+  /// assert_eq!(table.with(index, |process| process.id), Some(index));
   /// ```
   ///
   /// [`MaybeUninit<T>`]: core::mem::MaybeUninit
@@ -181,10 +181,11 @@ where
     self.inner.write(init)
   }
 
-  /// Removes the entry at the given index.
+  /// Removes the entry at `index`.
   ///
-  /// Returns `true` if an entry was removed, `false` if already absent. The
-  /// slot can be reused at once. The value drops once no guard can reach it.
+  /// Returns `true` if it removed an entry, `false` if the slot was already
+  /// empty. A later insert may reuse the slot at once. The value drops once
+  /// every guard that can see it has dropped.
   ///
   /// # Examples
   ///
@@ -192,12 +193,12 @@ where
   /// use ptab::PTab;
   ///
   /// let table: PTab<i32> = PTab::new();
-  /// let idx = table.insert(42).unwrap();
+  /// let index = table.insert(42).unwrap();
   ///
   /// # #[cfg(feature = "sdd")]
   /// # {
-  /// assert!(table.remove(idx));
-  /// assert!(!table.remove(idx));
+  /// assert!(table.remove(index));
+  /// assert!(!table.remove(index));
   /// # }
   /// ```
   #[inline]
@@ -209,7 +210,7 @@ where
     self.inner.remove(index)
   }
 
-  /// Returns `true` if an entry exists at the given index.
+  /// Returns `true` if an entry exists at `index`.
   ///
   /// The result may be stale on return.
   ///
@@ -219,13 +220,13 @@ where
   /// use ptab::PTab;
   ///
   /// let table: PTab<i32> = PTab::new();
-  /// let idx = table.insert(42).unwrap();
+  /// let index = table.insert(42).unwrap();
   ///
-  /// assert!(table.exists(idx));
+  /// assert!(table.exists(index));
   /// # #[cfg(feature = "sdd")]
   /// # {
-  /// table.remove(idx);
-  /// assert!(!table.exists(idx));
+  /// assert!(table.remove(index));
+  /// assert!(!table.exists(index));
   /// # }
   /// ```
   #[inline]
@@ -235,8 +236,8 @@ where
 
   /// Accesses an entry by index, applying a function to it.
   ///
-  /// Returns [`None`] if no entry exists. A concurrent [`remove()`] does not
-  /// drop the entry while `f` runs.
+  /// Returns [`None`] if no entry exists. A concurrent [`remove()`] defers the
+  /// drop until `f` returns.
   ///
   /// # Examples
   ///
@@ -244,9 +245,9 @@ where
   /// use ptab::PTab;
   ///
   /// let table: PTab<String> = PTab::new();
-  /// let idx = table.insert("hello".to_string()).unwrap();
+  /// let index = table.insert("hello".to_string()).unwrap();
   ///
-  /// let len = table.with(idx, |s| s.len());
+  /// let len = table.with(index, |s| s.len());
   /// assert_eq!(len, Some(5));
   /// ```
   ///
@@ -259,9 +260,9 @@ where
     self.inner.with(index, &P::guard(), f)
   }
 
-  /// Returns a copy of the entry at the given index.
+  /// Returns a copy of the entry at `index`.
   ///
-  /// Equivalent to `self.with(index, |v| *v)`.
+  /// The same as `self.with(index, |v| *v)`.
   ///
   /// # Examples
   ///
@@ -269,9 +270,9 @@ where
   /// use ptab::PTab;
   ///
   /// let table: PTab<i32> = PTab::new();
-  /// let idx = table.insert(42).unwrap();
+  /// let index = table.insert(42).unwrap();
   ///
-  /// assert_eq!(table.read(idx), Some(42));
+  /// assert_eq!(table.read(index), Some(42));
   /// ```
   #[inline]
   pub fn read(&self, index: Detached) -> Option<T>
@@ -302,6 +303,8 @@ where
   /// assert!(seen.contains(&a));
   /// assert!(seen.contains(&b));
   /// ```
+  ///
+  /// [`WeakKeys`]: crate::table::WeakKeys
   #[inline]
   pub fn weak_keys(&self) -> WeakKeys<'_, T, P> {
     self.inner.weak_keys(P::guard())
@@ -314,9 +317,9 @@ where
 /// use ptab::PTab;
 ///
 /// let table: PTab<i32> = PTab::new();
-/// let idx = table.insert(42).unwrap();
+/// let index = table.insert(42).unwrap();
 ///
-/// assert!(format!("{table:?}").contains(&format!("{idx:?}: 42")));
+/// assert!(format!("{table:?}").contains(&format!("{index:?}: 42")));
 /// ```
 impl<T, P> Debug for PTab<T, P>
 where

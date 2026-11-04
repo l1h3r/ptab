@@ -20,7 +20,7 @@ use crate::params::ParamsExt;
 mod tests;
 
 // -----------------------------------------------------------------------------
-// Kani Proofs
+// Kani proofs
 // -----------------------------------------------------------------------------
 
 #[cfg(kani)]
@@ -54,17 +54,17 @@ where
 
     for index in 0..P::LENGTH.as_usize() {
       // SAFETY:
-      // - `index` is strictly less than `P::LENGTH`.
-      // - The allocation performed by `new_uninit` reserves space for exactly
-      //   `P::LENGTH` contiguous elements.
-      // - The pointer returned by `as_non_null` is properly aligned for `T`.
-      // - We have exclusive access to the allocation, so creating a unique
-      //   mutable reference is sound.
+      // - `index` is strictly less than `P::LENGTH`
+      // - the allocation performed by `new_uninit` reserves space for exactly
+      //   `P::LENGTH` contiguous elements
+      // - the pointer returned by `as_non_null` is properly aligned for `T`
+      // - this function has exclusive access to the allocation, so creating a
+      //   unique mutable reference is sound
       init(index, unsafe { this.as_non_null().add(index).as_mut() });
     }
 
-    // SAFETY: The loop above initializes every element in the allocation
-    //         exactly once, so all `P::LENGTH` elements are initialized.
+    // SAFETY: the loop in `new` initializes all `P::LENGTH` elements of the
+    //         allocation exactly once.
     unsafe { this.assume_init() }
   }
 
@@ -79,9 +79,9 @@ where
     }
 
     // SAFETY:
-    // - `P::LAYOUT` describes a non-zero-sized allocation.
+    // - `P::LAYOUT` describes a non-zero-sized allocation
     // - `P::LAYOUT` fits `P::LENGTH` values of `usize`, and `T` has the size
-    //   and alignment of `usize`.
+    //   and alignment of `usize`
     let raw: *mut u8 = unsafe { alloc(P::LAYOUT) };
 
     Array {
@@ -117,9 +117,9 @@ where
   #[inline]
   pub(crate) const fn as_slice(&self) -> &[T] {
     // SAFETY:
-    // - The allocation contains `P::LENGTH` contiguous elements of `T`.
-    // - For `Array<T, P>`, all elements are guaranteed to be initialized.
-    // - The pointer is valid for reads for the entire range.
+    // - the allocation contains `P::LENGTH` contiguous elements of `T`
+    // - `Array<T, P>` contains only initialized elements
+    // - the pointer is valid for reads for the entire range
     unsafe { slice::from_raw_parts(self.as_ptr(), P::LENGTH.as_usize()) }
   }
 
@@ -127,17 +127,16 @@ where
   #[inline]
   pub(crate) const fn as_mut_slice(&mut self) -> &mut [T] {
     // SAFETY:
-    // - The allocation contains `P::LENGTH` contiguous elements of `T`.
-    // - For `Array<T, P>`, all elements are guaranteed to be initialized.
-    // - `&mut self` guarantees unique access to the allocation.
+    // - the allocation contains `P::LENGTH` contiguous elements of `T`
+    // - `Array<T, P>` contains only initialized elements
+    // - `&mut self` gives unique access to the allocation
     unsafe { slice::from_raw_parts_mut(self.as_mut_ptr(), P::LENGTH.as_usize()) }
   }
 
   /// Returns a reference to the element at `index`.
   #[inline]
   pub(crate) const fn get(&self, index: Concrete<P>) -> &T {
-    // SAFETY: `Concrete<P>` ensures that the underlying index is strictly less
-    //         than `P::LENGTH`, so it is within bounds.
+    // SAFETY: `Concrete<P>` bounds the index by `P::LENGTH`.
     unsafe { self.get_unchecked(index.get()) }
   }
 
@@ -147,8 +146,8 @@ where
   /// # Safety
   ///
   /// `index` must be strictly less than `P::LENGTH`. Passing an out-of-bounds
-  /// index results in undefined behavior, even if the returned reference is not
-  /// used.
+  /// index results in undefined behavior, even if nothing uses the returned
+  /// reference.
   #[inline]
   pub(crate) const unsafe fn get_unchecked(&self, index: usize) -> &T {
     debug_assert!(
@@ -157,9 +156,9 @@ where
     );
 
     // SAFETY:
-    // - The caller guarantees `index < P::LENGTH`.
-    // - The allocation holds `P::LENGTH` contiguous elements.
-    // - The pointer is properly aligned and valid for reads.
+    // - the caller promises `index < P::LENGTH`
+    // - the allocation has room for `P::LENGTH` contiguous elements
+    // - the pointer is properly aligned and valid for reads
     unsafe { self.as_non_null().add(index).as_ref() }
   }
 }
@@ -172,16 +171,15 @@ where
   ///
   /// # Safety
   ///
-  /// The caller must guarantee that all elements in the allocation are fully
-  /// initialized. If any element is uninitialized, converting to `Array<T, P>`
-  /// results in immediate undefined behavior.
+  /// Every element in the allocation must be fully initialized. Converting
+  /// with an uninitialized element results in immediate undefined behavior.
   #[inline]
   pub(crate) unsafe fn assume_init(self) -> Array<T, P> {
     // SAFETY:
-    // - The caller guarantees that all elements are initialized.
-    // - `Array<MaybeUninit<T>, P>` and `Array<T, P>` have identical layout.
-    // - `ManuallyDrop` prevents `self` from being dropped, so the allocation is
-    //   not freed during the conversion.
+    // - the caller promises `self` contains only initialized elements
+    // - `Array<MaybeUninit<T>, P>` and `Array<T, P>` have identical layout
+    // - `ManuallyDrop` prevents `self` from dropping, so nothing frees the
+    //   allocation during the conversion
     Array {
       nonnull: ManuallyDrop::new(self).as_non_null().cast(),
       phantom: PhantomData,
@@ -195,9 +193,9 @@ where
 {
   fn drop(&mut self) {
     // SAFETY:
-    // - The allocation was created with `alloc(P::LAYOUT)` in `new_uninit`.
-    // - `P::LAYOUT` is the exact layout used for allocation.
-    // - `self.nonnull` still points to the original allocation.
+    // - `new_uninit` made the allocation with `alloc(P::LAYOUT)`
+    // - `P::LAYOUT` is the exact layout used for allocation
+    // - `self.nonnull` still points to the original allocation
     unsafe {
       dealloc(self.as_non_null().cast().as_ptr(), P::LAYOUT);
     }
