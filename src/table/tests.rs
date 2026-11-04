@@ -19,15 +19,14 @@ use crate::index::Concrete;
 use crate::index::Detached;
 use crate::index::RESERVED;
 use crate::index::abstract_next_serial;
-use crate::params::CACHE_LINE_SLOTS;
 use crate::params::Capacity;
 use crate::params::Params;
 use crate::params::ParamsExt as _;
 use crate::reclaim::Atomic as _;
+#[cfg(feature = "std")]
 use crate::sync::atomic::AtomicUsize;
 use crate::sync::atomic::Ordering;
 use crate::table;
-use crate::table::Atomic;
 use crate::table::DataArray;
 use crate::table::Guard;
 use crate::table::Permit;
@@ -36,6 +35,7 @@ use crate::table::Table;
 use crate::utils::DefParams;
 use crate::utils::MaxParams;
 use crate::utils::MinParams;
+use crate::utils::each_capacity;
 use crate::utils::std::BTreeSet;
 use crate::utils::std::String;
 use crate::utils::std::Vec;
@@ -76,39 +76,51 @@ macro_rules! make_drop {
 }
 
 // -----------------------------------------------------------------------------
-// Internals
+// ReadOnly
 // -----------------------------------------------------------------------------
 
 #[test]
-fn new_data_array() {
-  let array: DataArray<u64, DefParams> = ReadOnly::new_data_array();
-  let slice: &[Atomic<u64, DefParams>] = array.as_slice();
-  let guard: Guard<DefParams> = DefParams::guard();
+fn read_only_new_data_array_is_null() {
+  each_capacity!({
+    let array: DataArray<u64, P> = ReadOnly::<P>::new_data_array();
+    let guard: Guard<P> = P::guard();
 
-  for atomic in slice {
-    assert!(atomic.read(Ordering::Relaxed, &guard).is_null());
-  }
-}
-
-#[test]
-fn new_slot_array() {
-  let array: SlotArray<DefParams> = ReadOnly::new_slot_array();
-  let slice: &[AtomicUsize] = array.as_slice();
-
-  let mut offset: usize = 0;
-
-  for block in 0..DefParams::BLOCKS.get() {
-    for slot in 0..CACHE_LINE_SLOTS {
-      let expected: usize = slot * DefParams::BLOCKS.get() + block;
-      let received: usize = slice[offset].load(Ordering::Relaxed);
-      assert_eq!(received, expected);
-      offset += 1;
+    for atomic in array.as_slice() {
+      assert!(atomic.read(Ordering::Relaxed, &guard).is_null());
     }
-  }
+  });
 }
 
 #[test]
-fn reserve_slot() {
+fn read_only_new_slot_array_maps_cell_to_itself() {
+  each_capacity!({
+    let array: SlotArray<P> = ReadOnly::<P>::new_slot_array();
+
+    for (offset, cell) in array.as_slice().iter().enumerate() {
+      let index: Abstract<P> = Abstract::new(cell.load(Ordering::Relaxed));
+
+      assert_eq!(Concrete::from_abstract(index).get(), offset);
+    }
+  });
+}
+
+#[test]
+fn read_only_new_slot_array_has_serial_zero() {
+  each_capacity!({
+    let array: SlotArray<P> = ReadOnly::<P>::new_slot_array();
+
+    for cell in array.as_slice() {
+      assert!(cell.load(Ordering::Relaxed) < S);
+    }
+  });
+}
+
+// -----------------------------------------------------------------------------
+// Table
+// -----------------------------------------------------------------------------
+
+#[test]
+fn table_reserve_slot_fills_to_cap() {
   let table: Table<usize, DefParams> = Table::new();
 
   for _ in 0..table.cap() {
@@ -122,7 +134,7 @@ fn reserve_slot() {
 
 #[cfg(feature = "std")]
 #[test]
-fn reserve_slot_race() {
+fn table_reserve_slot_race_grants_cap() {
   static PERMITS: AtomicUsize = AtomicUsize::new(0);
 
   let table: Arc<Table<usize, DefParams>> = Arc::new(Table::new());
@@ -157,68 +169,47 @@ fn reserve_slot_race() {
   assert_eq!(table.cap(), PERMITS.load(Ordering::Relaxed));
 }
 
-fn undo_reservation_keeps_when_room<P: Params>() {
-  let table: Table<usize, P> = Table::new();
-  let length: u32 = P::LENGTH.as_u32();
+#[test]
+fn table_undo_reservation_keeps_when_room() {
+  each_capacity!({
+    let table: Table<usize, P> = Table::new();
+    let length: u32 = P::LENGTH.as_u32();
 
-  table.volatile.entries.store(length - 1, Ordering::Relaxed);
+    table.volatile.entries.store(length - 1, Ordering::Relaxed);
 
-  assert!(table.undo_reservation(length + 1).is_some());
-  assert_eq!(table.volatile.entries.load(Ordering::Relaxed), length - 1);
-}
-
-fn undo_reservation_keeps_at_length<P: Params>() {
-  let table: Table<usize, P> = Table::new();
-  let length: u32 = P::LENGTH.as_u32();
-
-  table.volatile.entries.store(length, Ordering::Relaxed);
-
-  assert!(table.undo_reservation(length + 1).is_some());
-  assert_eq!(table.volatile.entries.load(Ordering::Relaxed), length);
-}
-
-fn undo_reservation_undoes_when_full<P: Params>() {
-  let table: Table<usize, P> = Table::new();
-  let length: u32 = P::LENGTH.as_u32();
-
-  table.volatile.entries.store(length + 1, Ordering::Relaxed);
-
-  assert!(table.undo_reservation(length + 1).is_none());
-  assert_eq!(table.volatile.entries.load(Ordering::Relaxed), length);
+    assert!(table.undo_reservation(length + 1).is_some());
+    assert_eq!(table.volatile.entries.load(Ordering::Relaxed), length - 1);
+  });
 }
 
 #[test]
-fn undo_reservation_keeps_when_room_def() {
-  undo_reservation_keeps_when_room::<DefParams>();
+fn table_undo_reservation_keeps_at_length() {
+  each_capacity!({
+    let table: Table<usize, P> = Table::new();
+    let length: u32 = P::LENGTH.as_u32();
+
+    table.volatile.entries.store(length, Ordering::Relaxed);
+
+    assert!(table.undo_reservation(length + 1).is_some());
+    assert_eq!(table.volatile.entries.load(Ordering::Relaxed), length);
+  });
 }
 
 #[test]
-fn undo_reservation_keeps_when_room_max() {
-  undo_reservation_keeps_when_room::<MaxParams>();
+fn table_undo_reservation_undoes_when_full() {
+  each_capacity!({
+    let table: Table<usize, P> = Table::new();
+    let length: u32 = P::LENGTH.as_u32();
+
+    table.volatile.entries.store(length + 1, Ordering::Relaxed);
+
+    assert!(table.undo_reservation(length + 1).is_none());
+    assert_eq!(table.volatile.entries.load(Ordering::Relaxed), length);
+  });
 }
 
 #[test]
-fn undo_reservation_keeps_at_length_def() {
-  undo_reservation_keeps_at_length::<DefParams>();
-}
-
-#[test]
-fn undo_reservation_keeps_at_length_max() {
-  undo_reservation_keeps_at_length::<MaxParams>();
-}
-
-#[test]
-fn undo_reservation_undoes_when_full_def() {
-  undo_reservation_undoes_when_full::<DefParams>();
-}
-
-#[test]
-fn undo_reservation_undoes_when_full_max() {
-  undo_reservation_undoes_when_full::<MaxParams>();
-}
-
-#[test]
-fn acquire_slot() {
+fn table_acquire_slot_is_unique() {
   let table: Table<usize, DefParams> = Table::new();
   let mut indices: BTreeSet<usize> = BTreeSet::new();
 
@@ -234,7 +225,7 @@ fn acquire_slot() {
 }
 
 #[test]
-fn release_slot() {
+fn table_release_slot_empties() {
   let table: Table<usize, DefParams> = Table::new();
 
   for _ in 0..table.cap() {
@@ -249,7 +240,7 @@ fn release_slot() {
 }
 
 #[test]
-fn release_slot_fifo() {
+fn table_release_slot_is_fifo() {
   const ROUNDS: usize = 4;
 
   let table: Table<usize, MinParams> = Table::new();
@@ -304,7 +295,7 @@ fn release_slot_fifo() {
 
 #[cfg(feature = "std")]
 #[test]
-fn slot_churn() {
+fn table_slot_churn_keeps_len() {
   static PERMITS: AtomicUsize = AtomicUsize::new(0);
   static UNIQUES: AtomicUsize = AtomicUsize::new(0);
   static RELEASES: AtomicUsize = AtomicUsize::new(0);
@@ -372,12 +363,8 @@ fn slot_churn() {
   assert_eq!(table.len() as usize, PERMITS.load(Ordering::Relaxed));
 }
 
-// -----------------------------------------------------------------------------
-// API
-// -----------------------------------------------------------------------------
-
 #[test]
-fn cap() {
+fn table_cap() {
   let table: Table<usize, DefParams> = Table::new();
   assert_eq!(table.cap(), Capacity::DEF.as_usize());
 
@@ -389,7 +376,7 @@ fn cap() {
 }
 
 #[test]
-fn len() {
+fn table_len() {
   let table: Table<usize, DefParams> = Table::new();
   assert_eq!(table.len(), 0);
 
@@ -401,7 +388,7 @@ fn len() {
 }
 
 #[test]
-fn len_clamp() {
+fn table_len_clamps_to_cap() {
   let table: Table<usize, DefParams> = Table::new();
 
   table
@@ -413,7 +400,7 @@ fn len_clamp() {
 }
 
 #[test]
-fn is_empty() {
+fn table_is_empty() {
   let table: Table<usize, DefParams> = Table::new();
   assert!(table.is_empty());
 
@@ -425,7 +412,7 @@ fn is_empty() {
 }
 
 #[test]
-fn insert() {
+fn table_insert_increments_len() {
   let table: Table<usize, DefParams> = Table::new();
 
   assert_ne!(table.insert(123), None);
@@ -441,7 +428,7 @@ fn insert() {
 
 #[cfg(feature = "sdd")]
 #[test]
-fn remove() {
+fn table_remove_decrements_len() {
   let table: Table<usize, DefParams> = Table::new();
   let index: Detached = table.insert(123).unwrap();
 
@@ -456,7 +443,7 @@ fn remove() {
 
 #[cfg(feature = "sdd")]
 #[test]
-fn remove_nonexistent() {
+fn table_remove_missing_key() {
   let table: Table<usize, DefParams> = Table::new();
   let index: Detached = table.insert(123).unwrap();
 
@@ -466,7 +453,7 @@ fn remove_nonexistent() {
 
 #[cfg(feature = "sdd")]
 #[test]
-fn remove_recycling() {
+fn table_remove_recycles_slot() {
   let table: Table<usize, DefParams> = Table::new();
   let guard: Guard<DefParams> = DefParams::guard();
   let mut keys: Vec<Detached> = Vec::with_capacity(table.cap());
@@ -493,7 +480,7 @@ fn remove_recycling() {
 }
 
 #[test]
-fn with() {
+fn table_with() {
   let table: Table<usize, DefParams> = Table::new();
   let guard: Guard<DefParams> = DefParams::guard();
   let index: Detached = table.insert(123).unwrap();
@@ -502,7 +489,7 @@ fn with() {
 }
 
 #[test]
-fn with_nonexistent() {
+fn table_with_missing_key() {
   let table: Table<usize, DefParams> = Table::new();
   let guard: Guard<DefParams> = DefParams::guard();
   let index: Detached = Detached::from_bits(123);
@@ -511,7 +498,7 @@ fn with_nonexistent() {
 }
 
 #[test]
-fn exists() {
+fn table_exists() {
   let table: Table<usize, DefParams> = Table::new();
   let guard: Guard<DefParams> = DefParams::guard();
   let index: Detached = table.insert(123).unwrap();
@@ -520,7 +507,7 @@ fn exists() {
 }
 
 #[test]
-fn exists_nonexistent() {
+fn table_exists_missing_key() {
   let table: Table<usize, DefParams> = Table::new();
   let guard: Guard<DefParams> = DefParams::guard();
   let index: Detached = Detached::from_bits(123);
@@ -529,7 +516,7 @@ fn exists_nonexistent() {
 }
 
 #[test]
-fn read() {
+fn table_read() {
   let table: Table<usize, DefParams> = Table::new();
   let guard: Guard<DefParams> = DefParams::guard();
   let index: Detached = table.insert(123).unwrap();
@@ -538,7 +525,7 @@ fn read() {
 }
 
 #[test]
-fn read_nonexistent() {
+fn table_read_missing_key() {
   let table: Table<usize, DefParams> = Table::new();
   let guard: Guard<DefParams> = DefParams::guard();
   let index: Detached = Detached::from_bits(123);
@@ -547,7 +534,7 @@ fn read_nonexistent() {
 }
 
 #[test]
-fn weak_keys() {
+fn table_weak_keys_yields_insert_keys() {
   let table: Table<usize, DefParams> = Table::new();
   let mut keys: Vec<Detached> = Vec::with_capacity(table.cap());
 
@@ -565,7 +552,7 @@ fn weak_keys() {
 }
 
 #[test]
-fn weak_keys_last_slot() {
+fn table_weak_keys_last_slot() {
   let table: Table<usize, MaxParams> = Table::new();
   let index: Abstract<MaxParams> = Abstract::new(MaxParams::LENGTH.as_usize() - 1);
   let concrete: Concrete<MaxParams> = Concrete::from_abstract(index);
@@ -586,7 +573,7 @@ fn weak_keys_last_slot() {
 #[cfg(feature = "sdd")]
 #[cfg_attr(miri, ignore)]
 #[test]
-fn weak_keys_full_max() {
+fn table_weak_keys_full_max() {
   let table: Table<(), MaxParams> = Table::new();
   let first: Detached = table.insert(()).unwrap();
 
@@ -604,7 +591,7 @@ fn weak_keys_full_max() {
 }
 
 #[test]
-fn drop_empty() {
+fn table_drop_empty() {
   make_drop!(DropMe);
 
   assert_eq!(DropMe::load(), 0);
@@ -614,7 +601,7 @@ fn drop_empty() {
 
 #[cfg(feature = "sdd")]
 #[test]
-fn drop_half_full() {
+fn table_drop_half_full() {
   make_drop!(DropMe);
 
   let table: Table<DropMe, DefParams> = Table::new();
@@ -649,7 +636,7 @@ fn drop_half_full() {
 }
 
 #[test]
-fn drop_full() {
+fn table_drop_full() {
   make_drop!(DropMe);
 
   let table: Table<DropMe, DefParams> = Table::new();
@@ -665,7 +652,7 @@ fn drop_full() {
 }
 
 #[test]
-fn debug_empty() {
+fn table_debug_empty() {
   let table: Table<u64, DefParams> = Table::new();
   let value: String = format!("{table:?}");
 
@@ -673,7 +660,7 @@ fn debug_empty() {
 }
 
 #[test]
-fn debug_entry_format() {
+fn table_debug_entry_format() {
   let table: Table<u64, DefParams> = Table::new();
   let mut keys: Vec<Detached> = Vec::with_capacity(8);
 
@@ -688,17 +675,9 @@ fn debug_entry_format() {
   }
 }
 
-#[test]
-fn debug_weak_keys() {
-  let table: Table<usize, DefParams> = Table::new();
-  let debug: String = format!("{:?}", table.weak_keys(DefParams::guard()));
-
-  assert_eq!(debug, "WeakKeys(..)");
-}
-
 #[cfg(feature = "sdd")]
 #[test]
-fn min_capacity_ops() {
+fn table_min_capacity_ops() {
   let table: Table<usize, MinParams> = Table::new();
   let guard: Guard<MinParams> = MinParams::guard();
   let index: Detached = table.insert(123).unwrap();
@@ -707,4 +686,16 @@ fn min_capacity_ops() {
   assert_eq!(table.read(index, &guard), Some(123));
   assert!(table.remove(index));
   assert!(!table.exists(index, &guard));
+}
+
+// -----------------------------------------------------------------------------
+// WeakKeys
+// -----------------------------------------------------------------------------
+
+#[test]
+fn weak_keys_debug() {
+  let table: Table<usize, DefParams> = Table::new();
+  let debug: String = format!("{:?}", table.weak_keys(DefParams::guard()));
+
+  assert_eq!(debug, "WeakKeys(..)");
 }
