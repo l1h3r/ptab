@@ -138,16 +138,16 @@ impl Detached {
     self.bits
   }
 
-  /// Translates this index into its `(number, serial)` components.
+  /// Splits this index into its `(number, serial)` parts.
   #[inline]
-  pub const fn decompose<P>(self) -> (u32, u32)
+  pub const fn decompose<P>(self) -> (usize, usize)
   where
     P: Params + ?Sized,
   {
     let abstract_idx: Abstract<P> = detached_to_abstract(self);
 
-    let number: u32 = (abstract_idx.get() & P::ID_MASK_ENTRY) as u32;
-    let serial: u32 = (abstract_idx.get() >> P::ID_MASK_BITS) as u32;
+    let number: usize = abstract_idx.get() & P::ID_MASK_ENTRY;
+    let serial: usize = abstract_idx.get() >> P::ID_MASK_BITS;
 
     (number, serial)
   }

@@ -266,7 +266,7 @@ fn detached_decompose_number() {
     for value in samples::<P>() {
       let index: Detached = Detached::from_abstract(Abstract::<P>::new(value));
 
-      assert_eq!(index.decompose::<P>().0 as usize, value & P::ID_MASK_ENTRY);
+      assert_eq!(index.decompose::<P>().0, value & P::ID_MASK_ENTRY);
     }
   });
 }
@@ -277,7 +277,22 @@ fn detached_decompose_serial() {
     for value in samples::<P>() {
       let index: Detached = Detached::from_abstract(Abstract::<P>::new(value));
 
-      assert_eq!(index.decompose::<P>().1, (value >> P::ID_MASK_BITS) as u32);
+      assert_eq!(index.decompose::<P>().1, value >> P::ID_MASK_BITS);
+    }
+  });
+}
+
+#[test]
+fn detached_decompose_round_trips() {
+  each_capacity!({
+    for value in samples::<P>() {
+      let index: Detached = Detached::from_abstract(Abstract::<P>::new(value));
+      let (number, serial): (usize, usize) = index.decompose::<P>();
+
+      assert_eq!(
+        Abstract::<P>::new((serial << P::ID_MASK_BITS) | number),
+        Abstract::from_detached(index),
+      );
     }
   });
 }
