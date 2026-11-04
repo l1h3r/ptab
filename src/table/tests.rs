@@ -19,6 +19,7 @@ use crate::index::Concrete;
 use crate::index::Detached;
 use crate::index::RESERVED;
 use crate::index::abstract_next_serial;
+use crate::params::CACHE_LINE_SLOTS;
 use crate::params::Capacity;
 use crate::params::Params;
 use crate::params::ParamsExt as _;
@@ -424,6 +425,24 @@ fn table_insert_increments_len() {
   }
 
   assert_eq!(table.len(), 17);
+}
+
+#[test]
+fn table_insert_key_order() {
+  each_capacity!({
+    let table: Table<usize, P> = Table::new();
+    let blocks: usize = (S / CACHE_LINE_SLOTS).max(1);
+
+    assert_eq!(P::BLOCKS.get(), blocks);
+
+    for index in 0..table.cap() {
+      let expected: usize = (index % blocks) * CACHE_LINE_SLOTS + index / blocks;
+
+      assert_eq!(table.insert(index), Some(Detached::from_bits(expected)));
+    }
+
+    assert_eq!(table.insert(0), None);
+  });
 }
 
 #[cfg(feature = "sdd")]
