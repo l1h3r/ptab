@@ -121,6 +121,13 @@ pub unsafe trait Collector: CollectorWeak {}
 /// [`Atomic::read()`]: crate::reclaim::Atomic::read
 /// [`Collector`]: crate::reclaim::Collector
 pub trait CollectorWeak {
+  /// Ensure `Atomic<T>` has the same size and alignment as a raw pointer.
+  #[doc(hidden)]
+  const ASSERT_ATOMIC: () = {
+    assert!(align_of::<Self::Atomic<()>>() == align_of::<usize>());
+    assert!(size_of::<Self::Atomic<()>>() == size_of::<usize>());
+  };
+
   /// A guard that keeps the current thread pinned.
   type Guard;
 
