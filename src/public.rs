@@ -254,7 +254,7 @@ where
   #[inline]
   pub fn with<F, R>(&self, index: Detached, f: F) -> Option<R>
   where
-    F: Fn(&T) -> R,
+    F: FnOnce(&T) -> R,
   {
     self.inner.with(index, &P::guard(), f)
   }
