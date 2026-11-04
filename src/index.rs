@@ -11,7 +11,7 @@ use crate::params::ParamsExt;
 // -----------------------------------------------------------------------------
 
 #[cfg_attr(coverage_nightly, coverage(off))]
-#[cfg(test)]
+#[cfg(all(test, not(any(loom, shuttle))))]
 mod tests;
 
 // -----------------------------------------------------------------------------

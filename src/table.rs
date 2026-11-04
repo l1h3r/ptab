@@ -401,15 +401,13 @@ where
     Abstract::new(self.free_id.fetch_add(1, Release) as usize)
   }
 
-  #[allow(dead_code, reason = "not used by loom/shuttle tests")]
-  #[cfg(test)]
+  #[cfg(all(test, not(any(loom, shuttle))))]
   #[inline]
   fn load_next_id(&self) -> usize {
     self.next_id.load(Relaxed) as usize
   }
 
-  #[allow(dead_code, reason = "not used by loom/shuttle tests")]
-  #[cfg(test)]
+  #[cfg(all(test, not(any(loom, shuttle))))]
   #[inline]
   fn load_free_id(&self) -> usize {
     self.free_id.load(Relaxed) as usize

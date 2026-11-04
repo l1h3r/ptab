@@ -19,6 +19,7 @@ pub(crate) type MaxParams = ConstParams<{ Capacity::MAX.as_usize() }>;
 #[allow(dead_code, reason = "conditional")]
 pub(crate) type MinParams = ConstParams<{ Capacity::MIN.as_usize() }>;
 
+#[allow(dead_code, reason = "conditional")]
 pub(crate) struct NoLength;
 
 impl Params for NoLength {
@@ -29,10 +30,10 @@ impl Params for NoLength {
 // Hash
 // -----------------------------------------------------------------------------
 
-#[cfg(test)]
+#[cfg(all(test, not(any(loom, shuttle))))]
 struct Fnv(u64);
 
-#[cfg(test)]
+#[cfg(all(test, not(any(loom, shuttle))))]
 impl Hasher for Fnv {
   fn finish(&self) -> u64 {
     self.0
@@ -45,7 +46,7 @@ impl Hasher for Fnv {
   }
 }
 
-#[cfg(test)]
+#[cfg(all(test, not(any(loom, shuttle))))]
 pub(crate) fn hash<T: Hash>(value: T) -> u64 {
   let mut hasher: Fnv = Fnv(0xcbf2_9ce4_8422_2325);
   value.hash(&mut hasher);
