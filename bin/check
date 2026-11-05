@@ -1,0 +1,216 @@
+#!/usr/bin/env bash
+
+# Runs the gates as named groups. CI calls the same groups.
+#
+# Usage:
+#   ./bin/check                    # every group, in the order below
+#   ./bin/check <group> [args...]  # one group; args go to each cargo call
+#
+# Groups: msrv rustfmt rustdoc clippy tests loom shuttle miri kani asan tsan
+#
+# Examples:
+#   ./bin/check loom insert                 # one model by name
+#   ./bin/check loom -- --nocapture         # see output
+#   ./bin/check miri --target i686-unknown-linux-gnu
+#   ./bin/check kani --harness spread
+#   ./bin/check asan --target x86_64-unknown-linux-gnuasan
+#   ./bin/check tsan --target x86_64-unknown-linux-gnutsan
+#
+# Environment:
+#   MSRV              toolchain for msrv (default: 1.91.0)
+#   MIRI_SEEDS        -Zmiri-many-seeds range (default: 0..4)
+#   KANI_CACHE_LINES  cache lines for kani (default: 16 32 64 128 256)
+#   RUST_NIGHTLY      toolchain for clippy, miri, asan and tsan (default: nightly)
+
+set -euo pipefail
+
+MSRV="${MSRV:-1.91.0}"
+MIRI_SEEDS="${MIRI_SEEDS:-0..4}"
+KANI_CACHE_LINES="${KANI_CACHE_LINES:-16 32 64 128 256}"
+RUST_NIGHTLY="${RUST_NIGHTLY:-nightly}"
+
+host_triple() {
+  rustc "+$RUST_NIGHTLY" -vV | sed -n 's/^host: //p'
+}
+
+each() {
+  local sets="$1" set
+  shift
+  for set in $sets; do
+    run "$set" "$@"
+  done
+}
+
+require() {
+  local needle="$1" arg
+  shift
+  for arg in "$@"; do
+    [[ $arg == "$needle" ]] && return 0
+  done
+  return 1
+}
+
+# Check - MSRV
+
+run_msrv() {
+  run() {
+    local set="$1"
+    shift
+    RUSTFLAGS="${RUSTFLAGS:-} -Dwarnings" \
+      cargo "+$MSRV" check --all-targets --no-default-features --features "$set" "$@"
+  }
+
+  each "alloc std sdd" "$@"
+}
+
+# Check - Rustfmt
+
+run_rustfmt() {
+  cargo fmt --check "$@"
+}
+
+# Check - Rustdoc
+
+run_rustdoc() {
+  RUSTDOCFLAGS="${RUSTDOCFLAGS:-} -Dwarnings" \
+    cargo doc --no-deps --all-features "$@"
+}
+
+# Check - Clippy
+
+run_clippy() {
+  run() {
+    local set="$1"
+    shift
+    cargo "+$RUST_NIGHTLY" clippy --all-targets --no-default-features --features "$set" "$@" -- -D warnings
+    RUSTFLAGS="${RUSTFLAGS:-} --cfg loom" \
+      cargo "+$RUST_NIGHTLY" clippy --all-targets --no-default-features --features "$set,loom" "$@" -- -D warnings
+    [[ $set == alloc ]] && return 0
+    RUSTFLAGS="${RUSTFLAGS:-} --cfg shuttle" \
+      cargo "+$RUST_NIGHTLY" clippy --all-targets --no-default-features --features "$set,shuttle" "$@" -- -D warnings
+  }
+
+  each "alloc std sdd" "$@"
+}
+
+# Check - Tests
+
+run_tests() {
+  run() {
+    local set="$1"
+    shift
+    cargo test --no-default-features --features "$set" "$@"
+  }
+
+  each "alloc std sdd" "$@"
+}
+
+# Check - Tests (loom)
+
+run_loom() {
+  run() {
+    local set="$1"
+    shift
+    RUSTFLAGS="${RUSTFLAGS:-} -Cdebug-assertions=on --cfg loom" \
+      cargo test --release --tests --no-default-features --features "$set,loom" "$@"
+  }
+
+  each "alloc std sdd" "$@"
+}
+
+# Check - Tests (shuttle)
+
+run_shuttle() {
+  run() {
+    local set="$1"
+    shift
+    RUSTFLAGS="${RUSTFLAGS:-} -Cdebug-assertions=on --cfg shuttle" \
+      cargo test --release --tests --no-default-features --features "$set,shuttle" "$@"
+  }
+
+  # TODO: alloc
+  each "std sdd" "$@"
+}
+
+# Check - Miri
+
+run_miri() {
+  run() {
+    local set="$1"
+    shift
+    MIRIFLAGS="${MIRIFLAGS:-} -Zmiri-strict-provenance -Zmiri-many-seeds=${MIRI_SEEDS}" \
+      cargo "+$RUST_NIGHTLY" miri test --no-default-features --features "$set" "$@"
+  }
+
+  each "alloc std sdd" "$@"
+}
+
+# Check - Kani
+
+run_kani() {
+  run() {
+    local set="$1"
+    shift
+    cargo kani -j --output-format terse --no-default-features --features "$set" "$@" 2>&1 |
+      awk '{ print }
+           /^ *\*\* [0-9]+ of [0-9]+ cover properties satisfied/ && $2 != $4 { failed = 1 }
+           END { if (failed) print "kani: a cover property is unsatisfiable" > "/dev/stderr"; exit failed }'
+  }
+
+  local line
+  for line in $KANI_CACHE_LINES; do
+    RUSTFLAGS="${RUSTFLAGS:+$RUSTFLAGS }--cfg ptab_cache_line=\"$line\"" each "alloc sdd" "$@"
+  done
+}
+
+# Check - Address Sanitizer
+
+run_asan() {
+  run() {
+    local set="$1"
+    shift
+    ASAN_OPTIONS="${ASAN_OPTIONS:+$ASAN_OPTIONS:}detect_leaks=0" \
+    RUSTFLAGS="${RUSTFLAGS:-} -Zsanitizer=address" \
+      cargo "+$RUST_NIGHTLY" test --all-targets --no-default-features --features "$set" "$@"
+  }
+
+  if require --target "$@"; then
+    each "alloc std sdd" "$@"
+  else
+    each "alloc std sdd" --target "$(host_triple)" -Zbuild-std "$@"
+  fi
+}
+
+# Check - Thread Sanitizer
+
+run_tsan() {
+  run() {
+    local set="$1"
+    shift
+    RUSTFLAGS="${RUSTFLAGS:-} -Zsanitizer=thread" \
+      cargo "+$RUST_NIGHTLY" test --all-targets --no-default-features --features "$set" "$@"
+  }
+
+  if require --target "$@"; then
+    each "alloc std sdd" "$@"
+  else
+    each "alloc std sdd" --target "$(host_triple)" -Zbuild-std "$@"
+  fi
+}
+
+# Dispatch
+
+ALL="msrv rustfmt rustdoc clippy tests loom shuttle miri kani asan tsan"
+
+if (($# == 0)); then
+  for group in $ALL; do
+    "run_$group"
+  done
+elif require "$1" $ALL; then
+  group="$1"
+  shift
+  "run_$group" "$@"
+else
+  echo "usage: $0 [${ALL// /|}] [args...]" >&2
+  exit 2
+fi

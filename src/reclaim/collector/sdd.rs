@@ -28,8 +28,10 @@ impl CollectorWeak for Sdd {
 
   #[inline]
   fn flush() {
-    // sdd triggers reclamation after we've observed three new epochs; we
-    // observe one extra since we might lag behind the global value.
+    // Taking a guard `EPOCH` times moves this thread three epochs past the
+    // epoch that retired a value, even from one epoch behind the global epoch.
+    //
+    // ref: sdd-4.8.11 src/guard.rs:47
     const EPOCH: usize = 4;
 
     for _ in 0..EPOCH {
@@ -39,7 +41,7 @@ impl CollectorWeak for Sdd {
 }
 
 // -----------------------------------------------------------------------------
-// Atomic Ptr
+// Atomic ptr
 // -----------------------------------------------------------------------------
 
 impl<T> Atomic<T> for sdd::AtomicOwned<T> {
@@ -71,19 +73,19 @@ impl<T> Atomic<T> for sdd::AtomicOwned<T> {
       init(&mut uninit);
 
       // SAFETY:
-      // - The `init` closure is required to fully initialize `uninit`.
-      // - After `init` returns, the value is assumed to be initialized.
+      // - the `init` closure must fully initialize `uninit`
+      // - after `init` returns, this code treats the value as initialized
       unsafe { uninit.assume_init() }
     });
 
     let old: (Option<sdd::Owned<T>>, sdd::Tag) = self.swap((Some(value), NO_TAG), order);
 
-    debug_assert!(old.0.is_none(), "Atomic<T> is occupied!");
-    debug_assert!(old.1 == NO_TAG, "Atomic<T> is tagged!");
+    debug_assert!(old.0.is_none(), "`Atomic<T>` is occupied");
+    debug_assert!(old.1 == NO_TAG, "`Atomic<T>` is tagged");
 
     // SAFETY:
-    // - Slot allocation guarantees the slot is empty before calling `write`.
-    // - Therefore `old.0` must be `None` and `old.1` must be `Tag::None`.
+    // - by slot allocation, the slot is empty before `write` runs
+    // - so `old.0` must be `None` and `old.1` must be `Tag::None`
     unsafe {
       hint::assert_unchecked(old.0.is_none());
       hint::assert_unchecked(old.1 == NO_TAG);
@@ -101,10 +103,10 @@ impl<T> Atomic<T> for sdd::AtomicOwned<T> {
 
     if let Some(value) = entry.into_owned(Ordering::Relaxed) {
       // SAFETY:
-      // - `entry.into_owned` transfers exclusive ownership of the value.
-      // - If `Some(value)` is returned, we are the unique owner.
-      // - Calling `drop_in_place` drops the contained `T` exactly once and
-      //   reclaims the associated allocation.
+      // - `entry.into_owned` transfers exclusive ownership of the value
+      // - if `into_owned` returns `Some(value)`, this function is the unique owner
+      // - calling `drop_in_place` drops the contained `T` exactly once and
+      //   reclaims the associated allocation
       unsafe {
         value.drop_in_place();
       }
@@ -117,7 +119,7 @@ impl<T> Atomic<T> for sdd::AtomicOwned<T> {
 }
 
 // -----------------------------------------------------------------------------
-// Shared Ptr
+// Shared ptr
 // -----------------------------------------------------------------------------
 
 impl<'guard, T> Shared<'guard, T> for sdd::Ptr<'guard, T> {
@@ -129,13 +131,13 @@ impl<'guard, T> Shared<'guard, T> for sdd::Ptr<'guard, T> {
   #[inline]
   fn as_ref(&self) -> Option<&'guard T> {
     // SAFETY:
-    // - `self` is either null or points to a fully initialized `T` written via
-    //   `Atomic::write`.
-    // - The pointer originates from `Box::into_raw`, so it is valid and
-    //   properly aligned for `T`.
-    // - Only shared references to `T` are created, so aliasing rules are not
-    //   violated.
-    // - `self` does not have any tag bits set.
+    // - `sdd::Ptr::as_ref_unchecked` requires that `self` has no tag bits
+    // - `Atomic::null`, `Atomic::write` and `Atomic::evict` store `Tag::None`,
+    //   so `self` has no tag bits
+    // - `self` is either null or points to the `T` that `sdd::Owned::new_with`
+    //   allocated in `Atomic::write`, and the guard pins it for `'guard`
+    // - this code creates only shared references to `T`, so it violates no
+    //   aliasing rule
     unsafe { self.as_ref_unchecked() }
   }
 }

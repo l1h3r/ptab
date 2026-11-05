@@ -6,6 +6,25 @@ use core::fmt::Result;
 use crate::params::Params;
 use crate::params::ParamsExt;
 
+// -----------------------------------------------------------------------------
+// Tests
+// -----------------------------------------------------------------------------
+
+#[cfg_attr(coverage_nightly, coverage(off))]
+#[cfg(all(test, not(any(loom, shuttle))))]
+mod tests;
+
+// -----------------------------------------------------------------------------
+// Kani proofs
+// -----------------------------------------------------------------------------
+
+#[cfg(kani)]
+mod proofs;
+
+// -----------------------------------------------------------------------------
+// Implementation
+// -----------------------------------------------------------------------------
+
 macro_rules! internal_index {
   ($name:ident) => {
     #[repr(transparent)]
@@ -70,19 +89,13 @@ macro_rules! internal_index {
 }
 
 // -----------------------------------------------------------------------------
-// Detached Index
+// Detached
 // -----------------------------------------------------------------------------
 
-/// An opaque index identifying a table entry.
+/// An opaque index for a table entry, returned by [`PTab::insert()`] and
+/// [`PTab::write()`].
 ///
-/// Returned by [`PTab::insert`] and [`PTab::write`]; used to access or remove
-/// entries.
-///
-/// # Generational Indices
-///
-/// Each index contains a generational component that changes when a slot is
-/// reused. This helps mitigate the [ABA problem]: a stale index from a removed
-/// entry will not match a new entry occupying the same slot.
+/// An index has a serial that changes when a later insert reuses its slot.
 ///
 /// # Examples
 ///
@@ -91,20 +104,12 @@ macro_rules! internal_index {
 ///
 /// let table: PTab<i32> = PTab::new();
 ///
-/// let idx = table.insert(42).unwrap();
-///
-/// // Access the entry by index
-/// assert_eq!(table.read(idx), Some(42));
-///
-/// // Indices are Copy
-/// let idx2 = idx;
-/// assert_eq!(table.read(idx2), Some(42));
+/// let index = table.insert(42).unwrap();
+/// assert_eq!(table.read(index), Some(42));
 /// ```
 ///
-/// [`PTab`]: crate::public::PTab
-/// [`PTab::insert`]: crate::public::PTab::insert
-/// [`PTab::write`]: crate::public::PTab::write
-/// [ABA problem]: https://en.wikipedia.org/wiki/ABA_problem
+/// [`PTab::insert()`]: crate::public::PTab::insert
+/// [`PTab::write()`]: crate::public::PTab::write
 #[derive(Clone, Copy, Hash, PartialEq, Eq, PartialOrd, Ord)]
 #[repr(transparent)]
 pub struct Detached {
@@ -114,10 +119,18 @@ pub struct Detached {
 impl Detached {
   /// Creates a [`Detached`] index from its raw bit representation.
   ///
-  /// # Warning
+  /// Table operations accept any `bits` and return [`None`] or `false` when no
+  /// entry matches.
   ///
-  /// An arbitrary bit pattern may not correspond to a valid table entry; using
-  /// it is safe but will return [`None`] or `false` from table operations.
+  /// # Examples
+  ///
+  /// ```
+  /// use ptab::{Detached, PTab};
+  ///
+  /// let table: PTab<i32> = PTab::new();
+  /// let index = Detached::from_bits(table.insert(1).unwrap().into_bits());
+  /// assert_eq!(table.read(index), Some(1));
+  /// ```
   #[inline]
   pub const fn from_bits(bits: usize) -> Self {
     Self { bits }
@@ -125,24 +138,44 @@ impl Detached {
 
   /// Returns the raw bit representation of this index.
   ///
-  /// See [`from_bits`] to reconstruct an index.
+  /// See [`from_bits()`] to reconstruct an index.
   ///
-  /// [`from_bits`]: Self::from_bits
+  /// # Examples
+  ///
+  /// ```
+  /// use ptab::{Detached, PTab};
+  ///
+  /// let table: PTab<i32> = PTab::new();
+  /// let index = table.insert(1).unwrap();
+  /// assert_eq!(Detached::from_bits(index.into_bits()), index);
+  /// ```
+  ///
+  /// [`from_bits()`]: Self::from_bits
   #[inline]
   pub const fn into_bits(self) -> usize {
     self.bits
   }
 
-  /// Translates this index into its `(number, serial)` components.
+  /// Splits this index into its `(number, serial)` parts.
+  ///
+  /// # Examples
+  ///
+  /// ```
+  /// use ptab::{DefaultParams, PTab};
+  ///
+  /// let table: PTab<i32> = PTab::new();
+  /// let (number, _serial) = table.insert(1).unwrap().decompose::<DefaultParams>();
+  /// assert!(number < table.capacity());
+  /// ```
   #[inline]
-  pub const fn decompose<P>(self) -> (u32, u32)
+  pub const fn decompose<P>(self) -> (usize, usize)
   where
     P: Params + ?Sized,
   {
     let abstract_idx: Abstract<P> = detached_to_abstract(self);
 
-    let number: u32 = (abstract_idx.get() & P::ID_MASK_ENTRY) as u32;
-    let serial: u32 = (abstract_idx.get() >> P::ID_MASK_BITS) as u32;
+    let number: usize = abstract_idx.get() & P::ID_MASK_ENTRY;
+    let serial: usize = abstract_idx.get() >> P::ID_MASK_BITS;
 
     (number, serial)
   }
@@ -173,7 +206,7 @@ impl Detached {
 }
 
 // -----------------------------------------------------------------------------
-// Abstract Index
+// Abstract
 // -----------------------------------------------------------------------------
 
 internal_index!(Abstract);
@@ -189,7 +222,7 @@ where
 }
 
 // -----------------------------------------------------------------------------
-// Concrete Index
+// Concrete
 // -----------------------------------------------------------------------------
 
 internal_index!(Concrete);
@@ -210,10 +243,10 @@ where
 }
 
 // -----------------------------------------------------------------------------
-// Index Mapping
+// Index mapping
 // -----------------------------------------------------------------------------
 
-/// Extracts the [`Abstract`] sequential index from a [`Detached`] index.
+/// Extracts the `Abstract` sequential index from a `Detached` index.
 #[inline]
 const fn detached_to_abstract<P>(detached: Detached) -> Abstract<P>
 where
@@ -225,7 +258,7 @@ where
   Abstract::new(value)
 }
 
-/// Extracts the [`Concrete`] cache-aware index from a [`Detached`] index.
+/// Extracts the `Concrete` cache-aware index from a `Detached` index.
 #[inline]
 const fn detached_to_concrete<P>(detached: Detached) -> Concrete<P>
 where
@@ -234,7 +267,7 @@ where
   Concrete::new(detached.into_bits() & P::ID_MASK_ENTRY)
 }
 
-/// Converts an [`Abstract`] sequential index to a [`Concrete`] cache-aware index.
+/// Converts an `Abstract` sequential index to a `Concrete` cache-aware index.
 #[inline]
 const fn abstract_to_concrete<P>(abstract_idx: Abstract<P>) -> Concrete<P>
 where
@@ -246,7 +279,7 @@ where
   Concrete::new(value)
 }
 
-/// Converts an [`Abstract`] sequential index to a [`Detached`] index.
+/// Converts an `Abstract` sequential index to a `Detached` index.
 #[inline]
 const fn abstract_to_detached<P>(abstract_idx: Abstract<P>) -> Detached
 where
@@ -259,191 +292,24 @@ where
   value
 }
 
-// -----------------------------------------------------------------------------
-// Tests
-// -----------------------------------------------------------------------------
+/// Marks a free-list entry whose index a thread has taken, all ones in the data
+/// width of a [`Detached`] index.
+///
+/// [`Detached`]: crate::index::Detached
+pub(crate) const RESERVED: usize = usize::MAX >> 4;
 
-#[cfg_attr(coverage_nightly, coverage(off))]
-#[cfg(test)]
-mod tests {
-  use std::collections::HashSet;
+/// Returns the `Abstract` index that follows `abstract_idx` in its slot.
+#[inline]
+pub(crate) const fn abstract_next_serial<P>(abstract_idx: Abstract<P>) -> Abstract<P>
+where
+  P: Params + ?Sized,
+{
+  let length: usize = P::LENGTH.as_usize();
+  let mut value: usize = abstract_idx.get().wrapping_add(length) & RESERVED;
 
-  use crate::index::Abstract;
-  use crate::index::Concrete;
-  use crate::index::Detached;
-  use crate::params::CACHE_LINE_SLOTS;
-  use crate::params::Params;
-  use crate::params::ParamsExt;
-  use crate::utils::each_capacity;
-
-  #[expect(clippy::clone_on_copy)]
-  #[test]
-  fn abstract_clone_copy() {
-    let a: Abstract<()> = Abstract::new(123);
-    let b: Abstract<()> = a.clone();
-    let c: Abstract<()> = b;
-
-    assert_eq!(a, b);
-    assert_eq!(b, c);
-    assert_eq!(c, a);
+  if value == RESERVED {
+    value = value.wrapping_add(length) & RESERVED;
   }
 
-  #[expect(clippy::clone_on_copy)]
-  #[test]
-  fn concrete_clone_copy() {
-    let a: Concrete<()> = Concrete::new(123);
-    let b: Concrete<()> = a.clone();
-    let c: Concrete<()> = b;
-
-    assert_eq!(a, b);
-    assert_eq!(b, c);
-    assert_eq!(c, a);
-  }
-
-  #[test]
-  fn abstract_debug_transparency() {
-    let value: usize = 123;
-    let index: Abstract<()> = Abstract::new(value);
-
-    assert_eq!(format!("{index:?}"), format!("{value:?}"));
-  }
-
-  #[test]
-  fn concrete_debug_transparency() {
-    let value: usize = 123;
-    let index: Concrete<()> = Concrete::new(value);
-
-    assert_eq!(format!("{index:?}"), format!("{value:?}"));
-  }
-
-  #[test]
-  fn detached_debug_transparency() {
-    let value: usize = 123;
-    let index: Detached = Detached::from_bits(value);
-
-    assert_eq!(format!("{index:?}"), format!("{value:?}"));
-  }
-
-  #[test]
-  fn detached_display_transparency() {
-    let value: usize = 123;
-    let index: Detached = Detached::from_bits(value);
-
-    assert_eq!(format!("{index}"), format!("{value}"));
-  }
-
-  #[test]
-  fn detached_bits_roundtrip() {
-    let data: usize = usize::MAX >> 2;
-    let bits: usize = Detached::from_bits(data).into_bits();
-
-    assert_eq!(data, bits);
-  }
-
-  #[test]
-  fn detached_decompose() {
-    each_capacity!({
-      for generation in 0..3 {
-        let offset: usize = generation * P::LENGTH.as_usize();
-
-        for index in 0..P::LENGTH.as_usize() {
-          let abstract_idx: Abstract<P> = Abstract::new(offset + index);
-          let detached_idx: Detached = Detached::from_abstract(abstract_idx);
-
-          let components: (u32, u32) = detached_idx.decompose::<P>();
-
-          assert_eq!(components.0 as usize, index);
-          assert_eq!(components.1 as usize, generation);
-        }
-      }
-    });
-  }
-
-  #[test]
-  fn abstract_to_concrete_covers_all_slots() {
-    each_capacity!({
-      let mut used: HashSet<usize> = HashSet::with_capacity(P::LENGTH.as_usize());
-
-      for index in 0..P::LENGTH.as_usize() {
-        let abstract_idx: Abstract<P> = Abstract::new(index);
-        let concrete_idx: Concrete<P> = Concrete::from_abstract(abstract_idx);
-
-        used.insert(concrete_idx.get());
-      }
-
-      assert_eq!(used.len(), P::LENGTH.as_usize());
-      assert_eq!(used.iter().min(), Some(&0));
-      assert_eq!(used.iter().max(), Some(&(P::LENGTH.as_usize() - 1)));
-    });
-  }
-
-  #[test]
-  fn abstract_to_detached_roundtrip() {
-    each_capacity!({
-      for index in 0..P::LENGTH.as_usize() {
-        let abstract_idx: Abstract<P> = Abstract::new(index);
-        let detached_idx: Detached = Detached::from_abstract(abstract_idx);
-        let recovery_idx: Abstract<P> = Abstract::from_detached(detached_idx);
-
-        assert_eq!(abstract_idx, recovery_idx);
-      }
-    });
-  }
-
-  #[test]
-  fn concrete_from_detached_matches_from_abstract() {
-    each_capacity!({
-      for index in 0..P::LENGTH.as_usize() {
-        let abstract_idx: Abstract<P> = Abstract::new(index);
-        let detached_idx: Detached = Detached::from_abstract(abstract_idx);
-
-        let from_abstract: Concrete<P> = Concrete::from_abstract(abstract_idx);
-        let from_detached: Concrete<P> = Concrete::from_detached(detached_idx);
-
-        assert_eq!(from_abstract, from_detached);
-      }
-    });
-  }
-
-  #[test]
-  fn cache_line_distribution() {
-    // Verify that consecutive base indices are distributed across cache lines
-    each_capacity!('block: {
-      if P::BLOCKS.get() <= 1 {
-        break 'block; // Skip solo blocks
-      }
-
-      // First `CACHE_LINE_SLOTS` indices should map to different blocks
-      let mut blocks: HashSet<usize> = HashSet::with_capacity(CACHE_LINE_SLOTS);
-
-      for index in 0..P::LENGTH.as_usize() {
-        let abstract_idx: Abstract<P> = Abstract::new(index);
-        let concrete_idx: Concrete<P> = Concrete::from_abstract(abstract_idx);
-
-        blocks.insert(concrete_idx.get() / CACHE_LINE_SLOTS);
-      }
-
-      assert_eq!(blocks.len(), P::BLOCKS.get());
-      assert_eq!(blocks.iter().min(), Some(&0));
-      assert_eq!(blocks.iter().max(), Some(&(P::BLOCKS.get() - 1)));
-    });
-  }
-
-  #[test]
-  fn serial_number_preservation() {
-    each_capacity!({
-      for generation in 0..16 {
-        let serial: usize = generation * P::LENGTH.as_usize();
-
-        for index in 0..P::LENGTH.as_usize() {
-          let abstract_idx: Abstract<P> = Abstract::new(serial + index);
-          let detached_idx: Detached = Detached::from_abstract(abstract_idx);
-          let recovery_idx: Abstract<P> = Abstract::from_detached(detached_idx);
-
-          assert_eq!(abstract_idx.get(), serial + index);
-          assert_eq!(abstract_idx, recovery_idx);
-        }
-      }
-    });
-  }
+  Abstract::new(value)
 }
