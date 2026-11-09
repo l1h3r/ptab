@@ -12,46 +12,33 @@ use crate::table::Table;
 
 pub use crate::table::WeakKeys;
 
+// -----------------------------------------------------------------------------
+// Tests
+// -----------------------------------------------------------------------------
+
+#[cfg(doctest)]
+mod tests;
+
+// -----------------------------------------------------------------------------
+// Implementation
+// -----------------------------------------------------------------------------
+
 /// A lock-free concurrent table.
 ///
-/// `PTab` stores entries of type `T` and provides concurrent access through
-/// opaque [`Detached`] indices. It is parameterized by `P` to configure
-/// capacity at compile time.
-///
-/// See the [crate-level documentation] for an overview and examples.
-///
-/// # Type Parameters
-///
-/// - `T`: The type of values stored in the table.
-/// - `P`: Configuration implementing [`Params`]. Defaults to [`DefaultParams`].
+/// See the [crate-level documentation] for an overview.
 ///
 /// # Examples
-///
-/// Basic usage with default configuration:
 ///
 /// ```
 /// use ptab::PTab;
 ///
 /// let table: PTab<i32> = PTab::new();
 ///
-/// let idx = table.insert(42).unwrap();
-/// assert_eq!(table.with(idx, |&v| v), Some(42));
-/// ```
-///
-/// Custom capacity using [`ConstParams`]:
-///
-/// ```
-/// use ptab::{PTab, ConstParams};
-///
-/// let table: PTab<i32, ConstParams<256>> = PTab::new();
-/// assert_eq!(table.capacity(), 256);
+/// let index = table.insert(42).unwrap();
+/// assert_eq!(table.with(index, |&v| v), Some(42));
 /// ```
 ///
 /// [crate-level documentation]: crate
-/// [`Detached`]: crate::index::Detached
-/// [`ConstParams`]: crate::params::ConstParams
-/// [`DefaultParams`]: crate::params::DefaultParams
-/// [`Params`]: crate::params::Params
 #[repr(transparent)]
 pub struct PTab<T, P = DefaultParams>
 where
@@ -81,28 +68,24 @@ where
     }
   }
 
-  /// Returns the maximum number of entries the table can hold.
-  ///
-  /// Determined by [`Params::LENGTH`] and fixed for the lifetime of the table.
+  /// Returns the number of slots in the table.
   ///
   /// # Examples
   ///
   /// ```
   /// use ptab::{PTab, ConstParams};
   ///
-  /// let table: PTab<u64, ConstParams<512>> = PTab::new();
-  /// assert_eq!(table.capacity(), 512);
+  /// let table: PTab<u64, ConstParams<1024>> = PTab::new();
+  /// assert_eq!(table.capacity(), 1024);
   /// ```
-  ///
-  /// [`Params::LENGTH`]: crate::params::Params::LENGTH
   #[inline]
   pub const fn capacity(&self) -> usize {
     self.inner.cap()
   }
 
-  /// Returns the number of entries currently in the table.
+  /// Returns the number of entries in the table.
   ///
-  /// May change immediately due to concurrent operations.
+  /// The result may be stale on return.
   ///
   /// # Examples
   ///
@@ -141,8 +124,8 @@ where
 
   /// Inserts a value into the table and returns its index.
   ///
-  /// Returns [`None`] if the table is at capacity. Use [`write()`] instead when
-  /// the stored value needs to know its own index.
+  /// Returns [`None`] if the table is full. See [`write()`] to build the value
+  /// from its index.
   ///
   /// # Examples
   ///
@@ -151,8 +134,8 @@ where
   ///
   /// let table: PTab<&str> = PTab::new();
   ///
-  /// let idx = table.insert("hello").unwrap();
-  /// assert!(table.exists(idx));
+  /// let index = table.insert("hello").unwrap();
+  /// assert!(table.exists(index));
   /// ```
   ///
   /// [`write()`]: Self::write
@@ -164,18 +147,10 @@ where
     self.inner.insert(value)
   }
 
-  /// Inserts a value using an initialization function that receives the index.
+  /// Inserts the value `init` writes, passing it the new index.
   ///
-  /// Enables self-referential structures where the stored value contains its
-  /// own index. Returns [`None`] if the table is at capacity.
-  ///
-  /// # Requirements
-  ///
-  /// The `init` function:
-  ///
-  /// - **Must** fully initialize the [`MaybeUninit<T>`] before returning
-  /// - **Must not** panic (panics permanently leak a slot)
-  /// - **Should** avoid recursive table operations
+  /// Returns [`None`] if the table is full. `init` must initialize the
+  /// [`MaybeUninit<T>`]. A panic in `init` leaks the slot.
   ///
   /// # Examples
   ///
@@ -189,12 +164,11 @@ where
   ///
   /// let table: PTab<Process> = PTab::new();
   ///
-  /// let idx = table.write(|slot, id| {
+  /// let index = table.write(|slot, id| {
   ///   slot.write(Process { id, data: 42 });
   /// }).unwrap();
   ///
-  /// // The stored process knows its own index
-  /// table.with(idx, |proc| assert_eq!(proc.id, idx));
+  /// assert_eq!(table.with(index, |process| process.id), Some(index));
   /// ```
   ///
   /// [`MaybeUninit<T>`]: core::mem::MaybeUninit
@@ -207,11 +181,11 @@ where
     self.inner.write(init)
   }
 
-  /// Removes the entry at the given index.
+  /// Removes the entry at `index`.
   ///
-  /// Returns `true` if an entry was removed, `false` if already absent. The
-  /// slot becomes available for reuse immediately; memory is reclaimed via
-  /// epoch-based reclamation once no readers hold references.
+  /// Returns `true` if it removed an entry, `false` if the slot was already
+  /// empty. A later insert may reuse the slot at once. The value drops once
+  /// every guard that can see it has dropped.
   ///
   /// # Examples
   ///
@@ -219,22 +193,26 @@ where
   /// use ptab::PTab;
   ///
   /// let table: PTab<i32> = PTab::new();
-  /// let idx = table.insert(42).unwrap();
+  /// let index = table.insert(42).unwrap();
   ///
-  /// assert!(table.remove(idx));  // Entry removed
-  /// assert!(!table.remove(idx)); // Already gone
+  /// # #[cfg(feature = "sdd")]
+  /// # {
+  /// assert!(table.remove(index));
+  /// assert!(!table.remove(index));
+  /// # }
   /// ```
   #[inline]
   pub fn remove(&self, index: Detached) -> bool
   where
-    P::Collector: Collector, // Enforce safe reclamation
+    T: Send,
+    P::Collector: Collector,
   {
     self.inner.remove(index)
   }
 
-  /// Returns `true` if an entry exists at the given index.
+  /// Returns `true` if an entry exists at `index`.
   ///
-  /// May become stale immediately due to concurrent operations.
+  /// The result may be stale on return.
   ///
   /// # Examples
   ///
@@ -242,11 +220,14 @@ where
   /// use ptab::PTab;
   ///
   /// let table: PTab<i32> = PTab::new();
-  /// let idx = table.insert(42).unwrap();
+  /// let index = table.insert(42).unwrap();
   ///
-  /// assert!(table.exists(idx));
-  /// table.remove(idx);
-  /// assert!(!table.exists(idx));
+  /// assert!(table.exists(index));
+  /// # #[cfg(feature = "sdd")]
+  /// # {
+  /// assert!(table.remove(index));
+  /// assert!(!table.exists(index));
+  /// # }
   /// ```
   #[inline]
   pub fn exists(&self, index: Detached) -> bool {
@@ -255,9 +236,8 @@ where
 
   /// Accesses an entry by index, applying a function to it.
   ///
-  /// Returns [`None`] if no entry exists. The reference remains valid for the
-  /// callback's duration even under concurrent removal, due to epoch-based
-  /// reclamation.
+  /// Returns [`None`] if no entry exists. A concurrent [`remove()`] defers the
+  /// drop until `f` returns.
   ///
   /// # Examples
   ///
@@ -265,23 +245,24 @@ where
   /// use ptab::PTab;
   ///
   /// let table: PTab<String> = PTab::new();
-  /// let idx = table.insert("hello".to_string()).unwrap();
+  /// let index = table.insert("hello".to_string()).unwrap();
   ///
-  /// let len = table.with(idx, |s| s.len());
+  /// let len = table.with(index, |s| s.len());
   /// assert_eq!(len, Some(5));
   /// ```
+  ///
+  /// [`remove()`]: Self::remove
   #[inline]
   pub fn with<F, R>(&self, index: Detached, f: F) -> Option<R>
   where
-    F: Fn(&T) -> R,
+    F: FnOnce(&T) -> R,
   {
     self.inner.with(index, &P::guard(), f)
   }
 
-  /// Returns a copy of the entry at the given index.
+  /// Returns a copy of the entry at `index`.
   ///
-  /// Convenience method equivalent to `self.with(idx, |v| *v)`. Returns
-  /// [`None`] if no entry exists.
+  /// The same as `self.with(index, |v| *v)`.
   ///
   /// # Examples
   ///
@@ -289,9 +270,9 @@ where
   /// use ptab::PTab;
   ///
   /// let table: PTab<i32> = PTab::new();
-  /// let idx = table.insert(42).unwrap();
+  /// let index = table.insert(42).unwrap();
   ///
-  /// assert_eq!(table.read(idx), Some(42));
+  /// assert_eq!(table.read(index), Some(42));
   /// ```
   #[inline]
   pub fn read(&self, index: Detached) -> Option<T>
@@ -301,15 +282,9 @@ where
     self.inner.read(index, &P::guard())
   }
 
-  /// Returns a weakly consistent iterator over all currently allocated indices.
+  /// Returns an iterator over the indices of present entries.
   ///
-  /// # Semantics
-  ///
-  /// This iterator provides **weak snapshot semantics**:
-  ///
-  /// - Entries inserted after iteration begins **may or may not** be observed.
-  /// - Entries removed during iteration **may or may not** be observed.
-  /// - Each yielded index was valid at some instant during iteration.
+  /// See [`WeakKeys`] for consistency.
   ///
   /// # Examples
   ///
@@ -328,12 +303,24 @@ where
   /// assert!(seen.contains(&a));
   /// assert!(seen.contains(&b));
   /// ```
+  ///
+  /// [`WeakKeys`]: crate::table::WeakKeys
   #[inline]
   pub fn weak_keys(&self) -> WeakKeys<'_, T, P> {
     self.inner.weak_keys(P::guard())
   }
 }
 
+/// # Examples
+///
+/// ```
+/// use ptab::PTab;
+///
+/// let table: PTab<i32> = PTab::new();
+/// let index = table.insert(42).unwrap();
+///
+/// assert!(format!("{table:?}").contains(&format!("{index:?}: 42")));
+/// ```
 impl<T, P> Debug for PTab<T, P>
 where
   T: Debug,
@@ -347,6 +334,14 @@ where
   }
 }
 
+/// # Examples
+///
+/// ```
+/// use ptab::PTab;
+///
+/// let table: PTab<i32> = PTab::default();
+/// assert!(table.is_empty());
+/// ```
 impl<T, P> Default for PTab<T, P>
 where
   P: Params + ?Sized,

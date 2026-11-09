@@ -13,13 +13,28 @@ use crate::reclaim::collector;
 use crate::sync::atomic::AtomicUsize;
 
 // -----------------------------------------------------------------------------
-// Cache-line Properties
+// Tests
+// -----------------------------------------------------------------------------
+
+#[cfg_attr(coverage_nightly, coverage(off))]
+#[cfg(all(test, not(any(loom, shuttle))))]
+mod tests;
+
+// -----------------------------------------------------------------------------
+// Kani proofs
+// -----------------------------------------------------------------------------
+
+#[cfg(kani)]
+mod proofs;
+
+// -----------------------------------------------------------------------------
+// Cache-line properties
 // -----------------------------------------------------------------------------
 
 /// The size of a cache line in bytes.
 pub const CACHE_LINE: usize = size_of::<CachePadded<u8>>();
 
-/// The number of table slots that fit in a single cache line.
+/// The number of table slots that fit in one cache line.
 pub const CACHE_LINE_SLOTS: usize = CACHE_LINE / size_of::<AtomicUsize>();
 
 const _: () = assert!(
@@ -37,14 +52,19 @@ const _: () = assert!(
   "invalid params: `CACHE_LINE_SLOTS` must be a power of two",
 );
 
+const _: () = assert!(
+  Capacity::MIN.as_usize() >= CACHE_LINE_SLOTS,
+  "invalid params: `Capacity::MIN` must cover one cache line",
+);
+
 // -----------------------------------------------------------------------------
-// Configurable Params
+// Params
 // -----------------------------------------------------------------------------
 
 /// Compile-time configuration for a [`PTab`].
 ///
-/// Allows compile-time customization of table parameters. The simplest approach
-/// is through [`ConstParams`]:
+/// [`ConstParams`] sets the capacity and takes the collector of
+/// [`DefaultParams`]:
 ///
 /// ```
 /// use ptab::{PTab, ConstParams};
@@ -52,37 +72,48 @@ const _: () = assert!(
 /// type MyTable<T> = PTab<T, ConstParams<8192>>;
 /// ```
 ///
+/// # Examples
+///
+/// ```
+/// use ptab::{Capacity, DefaultParams, PTab, Params};
+///
+/// struct Small;
+///
+/// impl Params for Small {
+///   type Collector = <DefaultParams as Params>::Collector;
+///   const LENGTH: Capacity = Capacity::MIN;
+/// }
+///
+/// let table: PTab<u8, Small> = PTab::new();
+/// assert_eq!(table.capacity(), 1024);
+/// ```
+///
+/// [`ConstParams`]: crate::params::ConstParams
+/// [`DefaultParams`]: crate::params::DefaultParams
 /// [`PTab`]: crate::public::PTab
 pub trait Params {
-  /// The memory reclamation strategy used for removed entries.
-  ///
-  /// See [`Collector`] for more info.
-  ///
-  /// [`Collector`]: crate::reclaim::Collector
+  /// The collector for removed entries.
   type Collector: CollectorWeak;
 
-  /// The maximum number of entries the table can hold.
-  ///
-  /// See [`Capacity`] for more info.
+  /// The number of slots.
   const LENGTH: Capacity = DefaultParams::LENGTH;
 }
 
 // -----------------------------------------------------------------------------
-// Configurable Params - Extensions
+// ParamsExt
 // -----------------------------------------------------------------------------
 
-/// Derived parameters computed from [`Params`].
+/// Constants derived from [`Params`].
 ///
-/// Automatically implemented for all [`Params`] types. Provides computed
-/// constants used internally.
-///
-/// # Example
+/// # Examples
 ///
 /// ```
 /// use ptab::{config::ParamsExt, ConstParams};
 ///
-/// println!("{:#?}", <ConstParams<1024> as ParamsExt>::debug());
+/// assert_eq!(<ConstParams<1024> as ParamsExt>::MEMORY, 1024 * size_of::<usize>());
 /// ```
+///
+/// [`Params`]: crate::params::Params
 pub trait ParamsExt: Params + Sealed {
   const BLOCKS: NonZeroUsize = derive_blocks::<Self>();
   const LAYOUT: Layout = derive_layout::<Self>();
@@ -123,13 +154,24 @@ impl<P> Sealed for P where P: Params + ?Sized {}
 impl<P> ParamsExt for P where P: Params + ?Sized {}
 
 // -----------------------------------------------------------------------------
-// Debug Params
+// DebugParams
 // -----------------------------------------------------------------------------
 
-/// A helper type for displaying [`Params`] configuration.
+/// A [`Debug`] view of a [`Params`], returned by [`ParamsExt::debug()`].
 ///
-/// Returned by [`ParamsExt::debug`]; implements [`Debug`] to show all derived
-/// configuration values.
+/// # Examples
+///
+/// ```
+/// use ptab::config::ParamsExt;
+/// use ptab::ConstParams;
+///
+/// let params = ConstParams::<1024>::debug();
+/// assert!(format!("{params:?}").contains("LENGTH"));
+/// ```
+///
+/// [`Debug`]: core::fmt::Debug
+/// [`Params`]: crate::params::Params
+/// [`ParamsExt::debug()`]: crate::params::ParamsExt::debug
 #[derive(Clone, Copy)]
 pub struct DebugParams<P>
 where
@@ -159,22 +201,25 @@ where
 }
 
 // -----------------------------------------------------------------------------
-// Default Params
+// DefaultParams
 // -----------------------------------------------------------------------------
 
-/// The default table configuration with [`Capacity::DEF`] slots.
+/// A [`Params`] with [`Capacity::DEF`] slots and the `Sdd` collector, the
+/// default for [`PTab`]. Without the `sdd` feature the collector is `Leak`.
 ///
-/// Used when creating a table without specifying a custom [`Params`] type.
-///
-/// # Example
+/// # Examples
 ///
 /// ```
 /// use ptab::{PTab, DefaultParams};
 ///
-/// // These are equivalent:
 /// let table1: PTab<u64> = PTab::new();
 /// let table2: PTab<u64, DefaultParams> = PTab::new();
+/// assert_eq!(table1.capacity(), table2.capacity());
 /// ```
+///
+/// [`Capacity::DEF`]: crate::params::Capacity::DEF
+/// [`Params`]: crate::params::Params
+/// [`PTab`]: crate::public::PTab
 #[derive(Clone, Copy)]
 #[non_exhaustive]
 pub struct DefaultParams;
@@ -190,31 +235,24 @@ impl Params for DefaultParams {
 }
 
 // -----------------------------------------------------------------------------
-// Const-Generic Params
+// ConstParams
 // -----------------------------------------------------------------------------
 
-/// A [`Params`] implementation with compile-time configurable capacity.
-///
-/// The recommended way to create tables with custom capacities. The capacity
-/// `N` is rounded up to the nearest power of two and clamped to
-/// <code>[Capacity::MIN]..=[Capacity::MAX]</code>.
+/// A [`Params`] with capacity `N`, rounded by [`Capacity::new()`], and the
+/// [`DefaultParams`] collector.
 ///
 /// # Examples
 ///
 /// ```
 /// use ptab::{PTab, ConstParams};
 ///
-/// let table: PTab<String, ConstParams<512>> = PTab::new();
-/// assert_eq!(table.capacity(), 512);
+/// let table: PTab<String, ConstParams<1000>> = PTab::new();
+/// assert_eq!(table.capacity(), 1024);
 /// ```
 ///
-/// ```
-/// use ptab::{PTab, ConstParams};
-///
-/// // Values are rounded up to powers of two
-/// let table: PTab<String, ConstParams<500>> = PTab::new();
-/// assert_eq!(table.capacity(), 512);
-/// ```
+/// [`Capacity::new()`]: crate::params::Capacity::new
+/// [`DefaultParams`]: crate::params::DefaultParams
+/// [`Params`]: crate::params::Params
 #[derive(Clone, Copy, Debug, Hash, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct ConstParams<const N: usize>;
@@ -229,45 +267,37 @@ impl<const N: usize> Params for ConstParams<N> {
 // Capacity
 // -----------------------------------------------------------------------------
 
-/// A type storing a `usize` which is a power of two in the range
-/// <code>[MIN]..=[MAX]</code>, and thus represents a possible table capacity.
+/// A table capacity, always a power of two in [`MIN`]`..=`[`MAX`].
 ///
 /// # Examples
 ///
 /// ```
 /// use ptab::Capacity;
 ///
-/// // Exact power of two
-/// let cap = Capacity::new(256);
-/// assert_eq!(cap.as_usize(), 256);
-///
-/// // Rounded up
-/// let cap = Capacity::new(100);
-/// assert_eq!(cap.as_usize(), 128);
-///
-/// // Clamped to minimum
-/// let cap = Capacity::new(1);
-/// assert_eq!(cap, Capacity::MIN);
-///
-/// // Clamped to maximum
-/// let cap = Capacity::new(usize::MAX);
-/// assert_eq!(cap, Capacity::MAX);
+/// assert_eq!(Capacity::new(1000).as_usize(), 1024);
 /// ```
 ///
-/// [MIN]: Self::MIN
-/// [MAX]: Self::MAX
+/// [`MIN`]: Self::MIN
+/// [`MAX`]: Self::MAX
 #[derive(Copy, Clone, PartialEq, Eq)]
 #[repr(transparent)]
 pub struct Capacity(CapacityEnum);
 
-const _: () = assert!(align_of::<Capacity>() == align_of::<usize>());
-const _: () = assert!(size_of::<Capacity>() == size_of::<usize>());
+const _: () = assert!(
+  align_of::<Capacity>() == align_of::<usize>(),
+  "`Capacity` must have the alignment of `usize`",
+);
+
+const _: () = assert!(
+  size_of::<Capacity>() == size_of::<usize>(),
+  "`Capacity` must have the size of `usize`",
+);
 
 impl Capacity {
-  /// The minimum supported capacity (2⁴ entries).
+  /// The smallest supported capacity (2¹⁰ entries).
   pub const MIN: Self = Self(CapacityEnum::MIN);
 
-  /// The maximum supported capacity (2²⁷ entries).
+  /// The largest supported capacity (2²⁷ entries).
   pub const MAX: Self = Self(CapacityEnum::MAX);
 
   /// The default capacity (2²⁰ entries).
@@ -276,19 +306,20 @@ impl Capacity {
   /// Creates a `Capacity` from a `usize`.
   ///
   /// Rounds up to the nearest power of two and clamps to
-  /// <code>[MIN]..=[MAX]</code>.
+  /// [`MIN`]`..=`[`MAX`].
   ///
   /// # Examples
   ///
   /// ```
   /// use ptab::Capacity;
   ///
-  /// assert_eq!(Capacity::new(100).as_usize(), 128);
+  /// assert_eq!(Capacity::new(1000).as_usize(), 1024);
   /// assert_eq!(Capacity::new(0), Capacity::MIN);
+  /// assert_eq!(Capacity::new(usize::MAX), Capacity::MAX);
   /// ```
   ///
-  /// [MIN]: Self::MIN
-  /// [MAX]: Self::MAX
+  /// [`MIN`]: Self::MIN
+  /// [`MAX`]: Self::MAX
   #[inline]
   pub const fn new(value: usize) -> Self {
     let Some(capacity) = value.checked_next_power_of_two() else {
@@ -301,9 +332,10 @@ impl Capacity {
       Self::MAX
     } else {
       // SAFETY:
-      // - `capacity` was produced by `checked_next_power_of_two`, so it is a
-      //   power of two.
-      // - The bounds checks above ensure `Self::MIN <= capacity <= Self::MAX`.
+      // - `checked_next_power_of_two` produced `capacity`, so `capacity` is a
+      //   power of two
+      // - the bounds checks before this line make `Self::MIN <= capacity <=
+      //   Self::MAX` true
       unsafe { Self::new_unchecked(capacity) }
     }
   }
@@ -312,10 +344,20 @@ impl Capacity {
   ///
   /// # Safety
   ///
-  /// `capacity` must be a power of two in the range <code>[MIN]..=[MAX]</code>.
+  /// `capacity` must be a power of two in the range [`MIN`]`..=`[`MAX`].
   ///
-  /// [MIN]: Self::MIN
-  /// [MAX]: Self::MAX
+  /// # Examples
+  ///
+  /// ```
+  /// use ptab::Capacity;
+  ///
+  /// // SAFETY: 1024 is a power of two in `MIN..=MAX`.
+  /// let capacity = unsafe { Capacity::new_unchecked(1024) };
+  /// assert_eq!(capacity, Capacity::MIN);
+  /// ```
+  ///
+  /// [`MIN`]: Self::MIN
+  /// [`MAX`]: Self::MAX
   #[inline]
   pub const unsafe fn new_unchecked(capacity: usize) -> Self {
     debug_assert!(
@@ -324,30 +366,56 @@ impl Capacity {
     );
 
     // SAFETY:
-    // - The caller guarantees that `capacity` is a power of two in the range
-    //   `[Self::MIN, Self::MAX]`.
-    // - `Capacity` has the same size and alignment as `usize`.
+    // - the caller promises that `capacity` is a power of two in the range
+    //   `[Self::MIN, Self::MAX]`
+    // - `Capacity` has the same size and alignment as `usize`
     unsafe { mem::transmute::<usize, Self>(capacity) }
   }
 
   /// Returns the capacity as a [`u32`].
+  ///
+  /// # Examples
+  ///
+  /// ```
+  /// use ptab::Capacity;
+  ///
+  /// assert_eq!(Capacity::MIN.as_u32(), 1024);
+  /// ```
   #[inline]
   pub const fn as_u32(self) -> u32 {
     self.0 as u32
   }
 
   /// Returns the capacity as a [`usize`].
+  ///
+  /// # Examples
+  ///
+  /// ```
+  /// use ptab::Capacity;
+  ///
+  /// assert_eq!(Capacity::new(2048).as_usize(), 2048);
+  /// ```
   #[inline]
   pub const fn as_usize(self) -> usize {
     self.0 as usize
   }
 
   /// Returns the capacity as a [`NonZeroUsize`].
+  ///
+  /// # Examples
+  ///
+  /// ```
+  /// use ptab::Capacity;
+  ///
+  /// assert_eq!(Capacity::new(2048).as_nonzero().get(), 2048);
+  /// ```
+  ///
+  /// [`NonZeroUsize`]: core::num::NonZeroUsize
   #[inline]
   pub const fn as_nonzero(self) -> NonZeroUsize {
     // SAFETY:
-    // - All valid `Capacity` values are non-zero powers of two.
-    // - `Capacity` has the same size and alignment as `usize`.
+    // - all valid `Capacity` values are non-zero powers of two
+    // - `Capacity` has the same size and alignment as `usize`
     unsafe { mem::transmute::<Self, NonZeroUsize>(self) }
   }
 
@@ -360,7 +428,7 @@ impl Capacity {
   /// ```
   /// use ptab::Capacity;
   ///
-  /// assert_eq!(Capacity::new(16).log2(), 4);
+  /// assert_eq!(Capacity::new(2048).log2(), 11);
   /// assert_eq!(Capacity::new(1024).log2(), 10);
   /// ```
   #[inline]
@@ -369,7 +437,7 @@ impl Capacity {
   }
 
   #[inline]
-  const fn is_valid(value: usize) -> bool {
+  pub(crate) const fn is_valid(value: usize) -> bool {
     value.is_power_of_two() && value >= Self::MIN.as_usize() && value <= Self::MAX.as_usize()
   }
 }
@@ -404,12 +472,6 @@ impl From<Capacity> for usize {
 #[derive(Copy, Clone, PartialEq, Eq)]
 #[repr(usize)]
 enum CapacityEnum {
-  _Capacity1Shl4 = 1 << 4,
-  _Capacity1Shl5 = 1 << 5,
-  _Capacity1Shl6 = 1 << 6,
-  _Capacity1Shl7 = 1 << 7,
-  _Capacity1Shl8 = 1 << 8,
-  _Capacity1Shl9 = 1 << 9,
   _Capacity1Shl10 = 1 << 10,
   _Capacity1Shl11 = 1 << 11,
   _Capacity1Shl12 = 1 << 12,
@@ -431,29 +493,29 @@ enum CapacityEnum {
 }
 
 impl CapacityEnum {
-  const MIN: Self = Self::_Capacity1Shl4;
+  const MIN: Self = Self::_Capacity1Shl10;
 
   #[cfg(miri)]
-  const MAX: Self = Self::_Capacity1Shl10;
+  const MAX: Self = Self::_Capacity1Shl11;
 
-  #[cfg(all(not(miri), test, not(feature = "slow")))]
+  #[cfg(all(not(miri), test))]
   const MAX: Self = Self::_Capacity1Shl16;
 
-  #[cfg(not(any(miri, all(test, not(feature = "slow")))))]
+  #[cfg(not(any(miri, test)))]
   const MAX: Self = Self::_Capacity1Shl27;
 
   #[cfg(miri)]
-  const DEF: Self = Self::_Capacity1Shl5;
-
-  #[cfg(all(not(miri), test, not(feature = "slow")))]
   const DEF: Self = Self::_Capacity1Shl10;
 
-  #[cfg(not(any(miri, all(test, not(feature = "slow")))))]
+  #[cfg(all(not(miri), test))]
+  const DEF: Self = Self::_Capacity1Shl11;
+
+  #[cfg(not(any(miri, test)))]
   const DEF: Self = Self::_Capacity1Shl20;
 }
 
 // -----------------------------------------------------------------------------
-// Misc. Utilities
+// Misc utilities
 // -----------------------------------------------------------------------------
 
 #[inline]
@@ -461,22 +523,18 @@ const fn derive_blocks<P>() -> NonZeroUsize
 where
   P: Params + ?Sized,
 {
-  // Determine the minimum valid size of table arrays.
   let Some(mem_bytes) = P::LENGTH.as_usize().checked_mul(size_of::<AtomicUsize>()) else {
     panic_for_blocks();
   };
 
-  // Round up so we have an even number of slots.
   let Some(mem_align) = mem_bytes.checked_next_multiple_of(CACHE_LINE) else {
     panic_for_blocks();
   };
 
-  // Make sure we don't overflow `isize::MAX`, otherwise the layout is invalid.
   if mem_align > isize::MAX as usize {
     panic_for_blocks();
   }
 
-  // Finally, compute the block count.
   let Some(blocks) = NonZeroUsize::new(mem_align / CACHE_LINE) else {
     panic_for_blocks();
   };
@@ -495,9 +553,9 @@ where
   );
 
   // SAFETY:
-  // - `P::MEMORY != 0` (asserted above).
-  // - `CACHE_LINE` is a power of two, so it is a valid alignment.
-  // - `P::MEMORY <= isize::MAX`, guaranteed by `derive_blocks`.
+  // - `P::MEMORY != 0` by the `assert!` in this function
+  // - `CACHE_LINE` is a power of two, so `CACHE_LINE` is a valid alignment
+  // - `P::MEMORY <= isize::MAX` by `derive_blocks`
   unsafe { Layout::from_size_align_unchecked(P::MEMORY, CACHE_LINE) }
 }
 
@@ -507,197 +565,4 @@ where
 #[cfg_attr(not(panic = "abort"), inline(never))]
 const fn panic_for_blocks() -> ! {
   panic!("invalid params: `BLOCKS` must be representable");
-}
-
-// -----------------------------------------------------------------------------
-// Tests
-// -----------------------------------------------------------------------------
-
-#[cfg_attr(coverage_nightly, coverage(off))]
-#[cfg(test)]
-mod tests {
-  use core::num::NonZeroUsize;
-
-  use crate::params::CACHE_LINE_SLOTS;
-  use crate::params::Capacity;
-  use crate::params::DefaultParams;
-  use crate::params::Params;
-  use crate::params::ParamsExt;
-  use crate::params::derive_blocks;
-  use crate::params::derive_layout;
-  use crate::utils::each_capacity;
-
-  #[test]
-  fn capacity_new_clamp_under_min() {
-    assert_eq!(Capacity::new(1), Capacity::MIN);
-  }
-
-  #[test]
-  fn capacity_new_clamp_over_max() {
-    assert_eq!(Capacity::new(Capacity::MAX.as_usize() + 1), Capacity::MAX);
-  }
-
-  #[test]
-  fn capacity_new_clamp_usize_max() {
-    assert_eq!(Capacity::new(usize::MAX), Capacity::MAX);
-  }
-
-  #[test]
-  fn capacity_new_exact() {
-    assert_eq!(Capacity::new(1 << 10).as_usize(), 1 << 10);
-  }
-
-  #[test]
-  fn capacity_new_round_up() {
-    assert_eq!(Capacity::new((1 << 10) - 1).as_usize(), 1 << 10);
-  }
-
-  #[test]
-  fn capacity_as_u32() {
-    each_capacity!({
-      assert_eq!(P::LENGTH.as_u32(), S as u32);
-    });
-  }
-
-  #[test]
-  fn capacity_as_usize() {
-    each_capacity!({
-      assert_eq!(P::LENGTH.as_usize(), S);
-    });
-  }
-
-  #[test]
-  fn capacity_as_nonzero() {
-    each_capacity!({
-      assert_eq!(P::LENGTH.as_nonzero(), NonZeroUsize::new(S).unwrap());
-    });
-  }
-
-  #[test]
-  fn capacity_log2() {
-    each_capacity!({
-      assert_eq!(P::LENGTH.log2(), S.ilog2());
-    });
-  }
-
-  #[test]
-  fn capacity_debug() {
-    assert_eq!(format!("{:?}", Capacity::MIN), "16 (1 << 4)");
-  }
-
-  #[test]
-  fn capacity_default() {
-    assert_eq!(Capacity::default(), Capacity::DEF);
-  }
-
-  #[test]
-  fn capacity_into_nonzero() {
-    each_capacity!({
-      assert_eq!(NonZeroUsize::from(P::LENGTH), NonZeroUsize::new(S).unwrap());
-    });
-  }
-
-  #[test]
-  fn capacity_into_usize() {
-    each_capacity!({
-      assert_eq!(usize::from(P::LENGTH), S);
-    });
-  }
-
-  #[test]
-  fn default_params() {
-    assert_eq!(DefaultParams::LENGTH, Capacity::DEF);
-  }
-
-  #[test]
-  fn debug_params() {
-    let params: String = format!("{:?}", DefaultParams::debug());
-
-    assert!(params.contains("DefaultParams"));
-    assert!(params.contains("LENGTH:"));
-    assert!(params.contains("BLOCKS:"));
-    assert!(params.contains("LAYOUT:"));
-    assert!(params.contains("MEMORY:"));
-  }
-
-  #[test]
-  fn params_length_vs_memory() {
-    each_capacity!({
-      let expected_size: usize = P::LENGTH.as_usize() * size_of::<usize>();
-      let received_size: usize = P::MEMORY;
-
-      assert!(received_size >= expected_size);
-    });
-  }
-
-  #[test]
-  fn params_length_vs_blocks() {
-    each_capacity!({
-      let expected: usize = P::LENGTH.as_usize();
-      let received: usize = P::BLOCKS.get() * CACHE_LINE_SLOTS;
-
-      assert_eq!(expected, received);
-    });
-  }
-
-  #[test]
-  fn params_derive_blocks_at_runtime() {
-    each_capacity!({
-      assert_eq!(P::BLOCKS, derive_blocks::<P>());
-    });
-  }
-
-  #[test]
-  fn params_derive_layout_at_runtime() {
-    each_capacity!({
-      assert_eq!(P::LAYOUT, derive_layout::<P>());
-    });
-  }
-
-  #[test]
-  fn params_blocks_power_of_two() {
-    each_capacity!({
-      assert!(P::BLOCKS.is_power_of_two());
-    });
-  }
-
-  #[test]
-  fn id_mask_bits_composition() {
-    each_capacity!({
-      assert_eq!(P::ID_MASK_BITS, P::ID_SHIFT_BLOCK + P::ID_SHIFT_INDEX);
-    });
-  }
-
-  #[test]
-  fn id_mask_entry_composition() {
-    each_capacity!({
-      assert_eq!(
-        P::ID_MASK_ENTRY,
-        (P::ID_MASK_BLOCK << P::ID_SHIFT_BLOCK) ^ P::ID_MASK_INDEX,
-      );
-    });
-  }
-
-  #[test]
-  fn id_mask_entry_covers_all_indices() {
-    each_capacity!({
-      for index in 0..P::LENGTH.as_usize() {
-        assert!(index <= P::ID_MASK_ENTRY);
-      }
-    });
-  }
-
-  #[test]
-  fn id_shift_block_composition() {
-    each_capacity!({
-      assert_eq!(P::ID_SHIFT_BLOCK, P::ID_MASK_INDEX.count_ones());
-    });
-  }
-
-  #[test]
-  fn id_shift_index_composition() {
-    each_capacity!({
-      assert_eq!(P::ID_SHIFT_INDEX, P::ID_MASK_BLOCK.count_ones());
-    });
-  }
 }

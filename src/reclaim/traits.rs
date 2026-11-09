@@ -5,22 +5,41 @@ use core::sync::atomic::Ordering;
 // Collector API
 // -----------------------------------------------------------------------------
 
-/// A memory reclamation strategy that guarantees eventual reclamation of
-/// evicted atomic entries.
+/// A memory reclamation strategy that frees every evicted entry eventually.
 ///
 /// # Safety
 ///
-/// This is an **unsafe marker trait** extending [`CollectorWeak`]. By
-/// implementing this trait, a collector makes the following guarantee:
+/// This trait extends [`CollectorWeak`]. An implementation must run the
+/// destructor of any value removed via [`Atomic::evict()`] and free its memory,
+/// assuming the program makes progress.
 ///
-/// > Any value removed via [`Atomic::evict()`] will eventually have its
-/// > destructor run and its memory reclaimed, assuming the program continues to
-/// > make progress.
+/// An implementation must not permanently leak an entry that
+/// [`Atomic::evict()`] removed successfully. An implementation may defer
+/// reclamation for a pinned thread or an epoch lag, and reclaims once
+/// reclamation is safe.
 ///
-/// In particular, implementations of `Collector` **must not permanently leak**
-/// entries that were successfully evicted. Temporary deferral of reclamation
-/// (e.g. due to pinned threads or epoch lag) is expected, but reclamation must
-/// occur once it is safe to do so.
+/// # Examples
+///
+/// ```
+/// # #[cfg(feature = "sdd")]
+/// # {
+/// use ptab::memory::collector::Sdd;
+/// use ptab::memory::{Collector, CollectorWeak};
+///
+/// struct Mine;
+///
+/// impl CollectorWeak for Mine {
+///   type Guard = <Sdd as CollectorWeak>::Guard;
+///   type Atomic<T> = <Sdd as CollectorWeak>::Atomic<T>;
+///   fn guard() -> Self::Guard { Sdd::guard() }
+///   fn flush() { Sdd::flush() }
+/// }
+///
+/// // SAFETY: `Mine` delegates every operation to `Sdd`, which frees evicted
+/// //         entries.
+/// unsafe impl Collector for Mine {}
+/// # }
+/// ```
 ///
 /// [`Atomic::evict()`]: crate::reclaim::Atomic::evict
 /// [`CollectorWeak`]: crate::reclaim::CollectorWeak
@@ -28,89 +47,146 @@ pub unsafe trait Collector: CollectorWeak {}
 
 /// A memory reclamation strategy.
 ///
-/// This trait defines the minimal interface required to safely manage
-/// concurrent access to shared atomic pointers. It does *not* guarantee that
-/// entries removed via [`Atomic::evict()`] are eventually reclaimed.
+/// Evicted values may leak. A [`Collector`] frees them eventually. A value read
+/// through [`Atomic::read()`] is valid until its guard drops.
 ///
-/// Implementations are permitted to permanently leak evicted entries. If
-/// eventual reclamation is required, see [`Collector`].
+/// `Atomic<T>` must have the size and alignment of `usize`, or the table fails
+/// to compile:
 ///
-/// # Overview
+/// ```compile_fail,E0080
+/// use core::mem::MaybeUninit;
+/// use core::sync::atomic::Ordering;
+/// use ptab::memory::{Atomic, CollectorWeak, Shared};
+/// use ptab::{PTab, Params};
 ///
-/// A `CollectorWeak` provides:
+/// struct Wide([usize; 4]);
+/// struct Ptr;
+/// struct Weak;
+/// struct P;
 ///
-/// - A [`Guard`] type that pins the current thread.
-/// - An [`Atomic`] pointer abstraction tied to that guard.
-/// - A mechanism ([`flush()`]) to attempt reclamation.
+/// impl<'guard, T> Shared<'guard, T> for Ptr {
+///   fn is_null(&self) -> bool { true }
+///   fn as_ref(&self) -> Option<&'guard T> { None }
+/// }
 ///
-/// The collector is responsible for ensuring that:
+/// impl<T> Atomic<T> for Wide {
+///   type Guard = ();
+///   type Shared<'guard> = Ptr where T: 'guard;
+///   fn null() -> Self { Wide([0; 4]) }
+///   fn read<'guard>(&self, _: Ordering, _: &'guard ()) -> Ptr { Ptr }
+///   fn write(&self, _: Ordering, _: impl FnOnce(&mut MaybeUninit<T>)) where T: 'static {}
+///   fn evict(&self, _: Ordering) -> bool { false }
+///   unsafe fn clear(&mut self) -> bool { false }
+/// }
 ///
-/// - A value read through [`Atomic::read()`] remains valid for the lifetime of
-///   the associated guard.
-/// - Values are not reclaimed while any guard that could observe them remains
-///   active.
+/// impl CollectorWeak for Weak {
+///   type Guard = ();
+///   type Atomic<T> = Wide;
+///   fn guard() {}
+///   fn flush() {}
+/// }
 ///
-/// # Guard
+/// impl Params for P {
+///   type Collector = Weak;
+/// }
 ///
-/// A guard represents a critical section during which shared pointers may be
-/// safely dereferenced. While a guard is alive:
+/// let _table: PTab<u8, P> = PTab::new();
+/// ```
 ///
-/// - Reclamation of objects reachable by that guard must be deferred.
-/// - Returned [`Shared`] pointers are guaranteed valid for the guard lifetime.
+/// # Examples
 ///
-/// [`Atomic`]: crate::reclaim::CollectorWeak::Atomic
+/// ```
+/// use core::sync::atomic::AtomicPtr;
+/// use ptab::memory::CollectorWeak;
+/// use ptab::{PTab, Params};
+///
+/// struct Mine;
+///
+/// impl CollectorWeak for Mine {
+///   type Guard = ();
+///   type Atomic<T> = AtomicPtr<T>;
+///   fn guard() {}
+///   fn flush() {}
+/// }
+///
+/// struct P;
+///
+/// impl Params for P {
+///   type Collector = Mine;
+/// }
+///
+/// let table: PTab<u8, P> = PTab::new();
+/// assert!(table.insert(1).is_some());
+/// ```
+///
 /// [`Atomic::read()`]: crate::reclaim::Atomic::read
-/// [`Atomic::evict()`]: crate::reclaim::Atomic::evict
 /// [`Collector`]: crate::reclaim::Collector
-/// [`flush()`]: crate::reclaim::CollectorWeak::flush
-/// [`Guard`]: crate::reclaim::CollectorWeak::Guard
-/// [`Shared`]: crate::reclaim::Atomic::Shared
 pub trait CollectorWeak {
-  /// Ensure `Atomic<T>` has the same size and alignment as a raw pointer.
+  /// Asserts that `Atomic<T>` has the same size and alignment as a raw pointer.
   #[doc(hidden)]
   const ASSERT_ATOMIC: () = {
     assert!(align_of::<Self::Atomic<()>>() == align_of::<usize>());
     assert!(size_of::<Self::Atomic<()>>() == size_of::<usize>());
   };
 
-  /// A guard that keeps the current thread pinned.
+  /// A guard that pins the current thread.
   type Guard;
 
-  /// An atomic pointer that can be safely shared between threads.
+  /// The slot type.
   type Atomic<T>: Atomic<T, Guard = Self::Guard>;
 
   /// Creates a new `Guard`, pinning the current thread.
   fn guard() -> Self::Guard;
 
-  /// Attempts to trigger memory reclamation.
-  ///
-  /// This function may:
-  ///
-  /// - Advance global epochs.
-  /// - Drain deferred reclamation queues.
-  /// - Execute destructors of previously evicted objects.
-  /// - Perform no work at all.
-  ///
-  /// # Guarantees
-  ///
-  /// - This function is best-effort.
-  /// - It does **not** guarantee that reclamation will occur.
-  /// - It does **not** guarantee progress.
+  /// Reclaims any evicted values it can, which may be none.
   fn flush();
 }
 
 // -----------------------------------------------------------------------------
-// Atomic Ptr
+// Atomic ptr
 // -----------------------------------------------------------------------------
 
 /// An atomic pointer that can be safely shared between threads.
+///
+/// # Examples
+///
+/// ```
+/// use core::mem::MaybeUninit;
+/// use core::sync::atomic::Ordering;
+/// use ptab::memory::{Atomic, Shared};
+///
+/// struct Null;
+///
+/// impl<'guard, T> Shared<'guard, T> for Null {
+///   fn is_null(&self) -> bool { true }
+///   fn as_ref(&self) -> Option<&'guard T> { None }
+/// }
+///
+/// struct Never(usize);
+///
+/// impl<T> Atomic<T> for Never {
+///   type Guard = ();
+///   type Shared<'guard> = Null where T: 'guard;
+///   fn null() -> Self { Never(0) }
+///   fn read<'guard>(&self, _: Ordering, _: &'guard ()) -> Null { Null }
+///   fn write(&self, _: Ordering, _: impl FnOnce(&mut MaybeUninit<T>)) where T: 'static {}
+///   fn evict(&self, _: Ordering) -> bool { false }
+///   unsafe fn clear(&mut self) -> bool { false }
+/// }
+///
+/// let never: Never = Atomic::<u8>::null();
+/// let shared = Atomic::<u8>::read(&never, Ordering::Relaxed, &());
+/// assert!(Shared::<u8>::is_null(&shared));
+/// ```
 pub trait Atomic<T> {
-  /// A guard that keeps the current thread pinned.
+  /// The guard [`read()`] takes.
+  ///
+  /// [`read()`]: Self::read
   type Guard;
 
-  /// A pointer to an object protected by the epoch GC.
+  /// The pointer [`read()`] returns.
   ///
-  /// The pointer is valid for use only during the lifetime `'guard`.
+  /// [`read()`]: Self::read
   type Shared<'guard>: Shared<'guard, T>
   where
     T: 'guard;
@@ -126,47 +202,44 @@ pub trait Atomic<T> {
   where
     T: 'static;
 
-  /// Swaps `null` into the pointer and schedules the previous entry for
-  /// reclamation.
+  /// Swaps in null and hands the previous value to the collector.
   ///
-  /// If the pointer was non-null, its previous value is removed and handed to
-  /// the collector. Reclamation is deferred according to the collector's
-  /// strategy.
-  ///
-  /// Returns `true` if a non-null value was removed, or `false` if the pointer
-  /// was already null.
-  ///
-  /// # Reclamation
-  ///
-  /// - For collectors implementing [`Collector`], a successfully evicted value
-  ///   is guaranteed to be eventually reclaimed.
-  /// - For [`CollectorWeak`] implementations, the value may be permanently
-  ///   leaked.
-  ///
-  /// # Concurrency
-  ///
-  /// The removed value may remain accessible to readers that hold a live
-  /// `Guard`. Implementations must ensure that reclamation is deferred until
-  /// deemed safe to destroy the value.
+  /// Returns `true` if the previous value was non-null. A reader with a guard
+  /// can still read the old value.
   fn evict(&self, order: Ordering) -> bool;
 
-  /// Executes the destructor (if any) of the pointed-to value.
+  /// Drops and frees the value, if any. Returns `true` if there was one.
   ///
   /// # Safety
   ///
-  /// See [`ptr::drop_in_place`] for minimum safety requirements.
+  /// See [`ptr::drop_in_place()`] for the safety requirements.
   ///
-  /// [`ptr::drop_in_place`]: core::ptr::drop_in_place
+  /// [`ptr::drop_in_place()`]: core::ptr::drop_in_place
   unsafe fn clear(&mut self) -> bool;
 }
 
 // -----------------------------------------------------------------------------
-// Shared Ptr
+// Shared ptr
 // -----------------------------------------------------------------------------
 
-/// A pointer to an object protected by the epoch GC.
+/// A pointer read from an [`Atomic`], valid for `'guard`.
 ///
-/// The pointer is valid for use only during the lifetime `'guard`.
+/// # Examples
+///
+/// ```
+/// use ptab::memory::Shared;
+///
+/// struct Null;
+///
+/// impl<'guard, T> Shared<'guard, T> for Null {
+///   fn is_null(&self) -> bool { true }
+///   fn as_ref(&self) -> Option<&'guard T> { None }
+/// }
+///
+/// assert!(Shared::<u8>::is_null(&Null));
+/// ```
+///
+/// [`Atomic`]: crate::reclaim::Atomic
 pub trait Shared<'guard, T> {
   /// Returns `true` if the pointer is null.
   fn is_null(&self) -> bool;

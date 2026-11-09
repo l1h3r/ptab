@@ -7,13 +7,13 @@
 
 A lock-free concurrent table for Rust.
 
-**ptab** provides a fixed-capacity table optimized for read-heavy concurrent workloads. Inspired by Erlang's BEAM process table, lookups scale linearly with CPU count by avoiding all shared memory writes.
+**ptab** provides a fixed-capacity table optimized for read-heavy concurrent workloads. The design follows the process table of the Erlang Abstract Machine (BEAM). Lookups never write shared memory and scale linearly with CPU count.
 
 ## Features
 
 - **Zero-contention reads** - Atomic loads for lock-free lookups.
-- **Cache-line distribution** - Prevents false sharing with no memory overhead.
-- **Generational indices** - Slot reuse mitigates ABA problems.
+- **Cache-line distribution** - Prevents false sharing at zero memory cost.
+- **Generational indices** - A serial per slot rejects stale indices after reuse.
 
 ## Usage
 

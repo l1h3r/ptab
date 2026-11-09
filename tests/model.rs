@@ -7,12 +7,16 @@ mod model {
     pub use ::loom::thread;
     pub use ::loom::thread::JoinHandle;
 
+    const MAX_BRANCHES: usize = 20_000;
+
     #[inline]
     pub fn check<F>(f: F)
     where
       F: Fn() + Sync + Send + 'static,
     {
-      loom::model(f);
+      let mut builder: loom::model::Builder = loom::model::Builder::new();
+      builder.max_branches = MAX_BRANCHES;
+      builder.check(f);
     }
   }
 
@@ -29,7 +33,15 @@ mod model {
     where
       F: Fn() + Sync + Send + 'static,
     {
-      shuttle::check_random(f, ITERATIONS);
+      shuttle::check_random(
+        move || {
+          f();
+          // SAFETY: `f` returned, so its tables have dropped and its threads
+          //         have joined.
+          unsafe { ptab::__shuttle_free_atomics() };
+        },
+        ITERATIONS,
+      );
     }
   }
 
@@ -48,9 +60,12 @@ use ptab::Detached;
 use ptab::PTab;
 
 type Insert = JoinHandle<Option<Detached>>;
+#[cfg(feature = "sdd")]
 type Remove = JoinHandle<bool>;
 type Lookup = JoinHandle<Option<usize>>;
+#[cfg(feature = "sdd")]
 type Exists = JoinHandle<bool>;
+#[cfg(feature = "sdd")]
 type Reader<T = usize> = JoinHandle<Option<T>>;
 
 type ArcTable = Arc<PTab<usize, ConstParams<{ Capacity::MIN.as_usize() }>>>;
@@ -71,6 +86,7 @@ impl Table {
     thread::spawn(move || table.insert(value))
   }
 
+  #[cfg(feature = "sdd")]
   fn spawn_remove(&self, index: Detached) -> Remove {
     let table: ArcTable = ArcTable::clone(&self.inner);
     thread::spawn(move || table.remove(index))
@@ -81,11 +97,13 @@ impl Table {
     thread::spawn(move || table.read(index))
   }
 
+  #[cfg(feature = "sdd")]
   fn spawn_exists(&self, index: Detached) -> Exists {
     let table: ArcTable = ArcTable::clone(&self.inner);
     thread::spawn(move || table.exists(index))
   }
 
+  #[cfg(feature = "sdd")]
   fn spawn_reader<T, F>(&self, index: Detached, f: F) -> Reader<T>
   where
     T: Send + 'static,
@@ -138,6 +156,7 @@ fn test_insert_read() {
   });
 }
 
+#[cfg(feature = "sdd")]
 #[test]
 fn test_insert_remove() {
   model::check(|| {
@@ -153,6 +172,7 @@ fn test_insert_remove() {
   });
 }
 
+#[cfg(feature = "sdd")]
 #[test]
 fn test_insert_remove_read() {
   model::check(|| {
@@ -172,6 +192,7 @@ fn test_insert_remove_read() {
   });
 }
 
+#[cfg(feature = "sdd")]
 #[test]
 fn test_remove() {
   model::check(|| {
@@ -192,17 +213,18 @@ fn test_remove() {
   });
 }
 
+#[cfg(feature = "sdd")]
 #[test]
 fn test_remove_race() {
   model::check(|| {
     let table: Table = Table::new();
     let index: Detached = table.insert(123).unwrap();
 
-    let remove_a: Remove = table.spawn_remove(index);
-    let remove_b: Remove = table.spawn_remove(index);
+    let handle_a: Remove = table.spawn_remove(index);
+    let handle_b: Remove = table.spawn_remove(index);
 
-    let removed_a: bool = remove_a.join().unwrap();
-    let removed_b: bool = remove_b.join().unwrap();
+    let removed_a: bool = handle_a.join().unwrap();
+    let removed_b: bool = handle_b.join().unwrap();
 
     assert!(removed_a || removed_b, "at least one remove should succeed");
     assert!(removed_a != removed_b, "exactly one remove should succeed");
@@ -212,6 +234,7 @@ fn test_remove_race() {
   });
 }
 
+#[cfg(feature = "sdd")]
 #[test]
 fn test_remove_race_read() {
   model::check(|| {
@@ -229,6 +252,7 @@ fn test_remove_race_read() {
   });
 }
 
+#[cfg(feature = "sdd")]
 #[test]
 fn test_remove_race_read_multi() {
   model::check(|| {
@@ -250,6 +274,7 @@ fn test_remove_race_read_multi() {
   });
 }
 
+#[cfg(feature = "sdd")]
 #[test]
 fn test_remove_race_exists() {
   model::check(|| {
@@ -266,6 +291,7 @@ fn test_remove_race_exists() {
   });
 }
 
+#[cfg(feature = "sdd")]
 #[test]
 fn test_remove_race_with() {
   model::check(|| {
@@ -328,6 +354,7 @@ fn test_length_consistency() {
   });
 }
 
+#[cfg(feature = "sdd")]
 #[test]
 fn test_length_insert_remove() {
   model::check(|| {
@@ -344,6 +371,7 @@ fn test_length_insert_remove() {
   });
 }
 
+#[cfg(feature = "sdd")]
 #[test]
 fn remove_and_reinsert() {
   model::check(|| {
@@ -393,6 +421,7 @@ fn test_three_way_insert() {
   });
 }
 
+#[cfg(feature = "sdd")]
 #[test]
 fn test_concurrent_remove_reinsert() {
   model::check(|| {
@@ -433,6 +462,7 @@ fn test_concurrent_remove_reinsert() {
   });
 }
 
+#[cfg(feature = "sdd")]
 #[test]
 fn test_read_unaffected_by_other_remove() {
   model::check(|| {
